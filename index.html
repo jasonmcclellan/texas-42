@@ -464,6 +464,76 @@ html, body {
 .gl-btn:hover { border-color: rgba(212,175,55,0.4); color: #e8cece; }
 .gl-btn.active { border-color: rgba(212,175,55,0.7); color: #d4af37; background: rgba(212,175,55,0.1); font-weight: 600; }
 #target-label { font-size: 9px; color: #7a6060; text-align: center; padding: 2px 0 3px; letter-spacing: 0.5px; }
+
+/* ===== MULTIPLAYER UI ===== */
+@keyframes mpPulse { 0%,100%{opacity:0.6} 50%{opacity:1} }
+@keyframes mpSlideDown { from{transform:translateY(-100%)} to{transform:translateY(0)} }
+
+/* Main menu */
+#main-menu-overlay .modal { text-align: center; }
+#main-menu-overlay h2 { margin-bottom: 6px; }
+.mm-subtitle { color: #b09090; font-size: 13px; margin-bottom: 24px; }
+.mm-btn { width: 100%; padding: 18px; font-size: 16px; margin-bottom: 10px; display: block; }
+
+/* Lobby */
+.mp-input {
+  width: 100%; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid rgba(232,206,206,0.2); background: rgba(0,0,0,0.3);
+  color: #e8cece; font-size: 15px; font-family: inherit; outline: none;
+  box-sizing: border-box;
+}
+.mp-input:focus { border-color: rgba(212,175,55,0.5); }
+.mp-input-label { font-size: 10px; color: #b09090; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 5px; }
+.mp-code-input { font-size: 22px; font-family: monospace; text-align: center; letter-spacing: 6px; }
+.mp-divider { text-align: center; color: #8a6868; font-size: 12px; margin: 10px 0; }
+.mp-error { color: #d44040; font-size: 12px; margin-top: 8px; min-height: 18px; }
+.mp-row { display: flex; gap: 8px; }
+.mp-back-btn { margin-top: 12px; }
+
+/* Waiting room */
+#mp-room-code-display {
+  font-size: 42px; font-weight: 700; color: #d4af37; letter-spacing: 8px;
+  text-align: center; margin-bottom: 20px; cursor: pointer; font-family: monospace;
+  user-select: all;
+}
+.mp-player-slot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 12px;
+  background: rgba(0,0,0,0.25); border: 1px solid rgba(232,206,206,0.12);
+  margin-bottom: 6px;
+}
+.mp-player-slot.filled { border-color: rgba(212,175,55,0.3); background: rgba(212,175,55,0.06); }
+.mp-player-slot.empty  { opacity: 0.45; }
+.mp-slot-icon  { font-size: 20px; }
+.mp-slot-name  { flex: 1; font-size: 14px; color: #e8cece; font-weight: 600; }
+.mp-slot-badge { font-size: 10px; padding: 2px 8px; border-radius: 8px; background: rgba(212,175,55,0.15); color: #d4af37; font-weight: 600; }
+.mp-start-info { text-align: center; color: #b09090; font-size: 12px; margin-top: 4px; }
+
+/* In-game overlays */
+.mp-disconnect-banner {
+  position: fixed; top: env(safe-area-inset-top,0); left: 0; right: 0;
+  background: rgba(160,0,0,0.92); backdrop-filter: blur(8px);
+  color: #fff; text-align: center; padding: 10px 16px;
+  font-size: 13px; font-weight: 600; z-index: 150;
+  animation: mpSlideDown 0.3s ease-out;
+}
+.mp-waiting-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.88); backdrop-filter: blur(8px);
+  padding: 14px 16px; text-align: center; z-index: 45;
+  font-size: 13px; color: #b09090;
+  border-top: 1px solid rgba(232,206,206,0.1);
+  animation: mpPulse 2s ease-in-out infinite;
+}
+.mp-name-tag {
+  position: absolute; font-size: 9px; color: #b09090; pointer-events: none; z-index: 5;
+  background: rgba(0,0,0,0.45); padding: 1px 6px; border-radius: 6px; white-space: nowrap;
+}
+.mp-name-tag.active { color: #d4af37; }
+#mp-name-north { top: 2px;    left: 50%; transform: translateX(-50%); }
+#mp-name-south { bottom: 2px; left: 50%; transform: translateX(-50%); }
+#mp-name-west  { left: 2px;   top: 50%;  transform: translateY(-50%); }
+#mp-name-east  { right: 2px;  top: 50%;  transform: translateY(-50%); }
 </style>
 </head>
 <body>
@@ -667,9 +737,86 @@ html, body {
       <button class="btn btn-danger btn-sm" style="margin-top:12px;width:100%;border-radius:10px;" onclick="closeSettings()">Close</button>
     </div>
   </div>
+
+  <!-- ===== MULTIPLAYER OVERLAYS ===== -->
+
+  <!-- Main menu: Solo vs Multiplayer -->
+  <div class="overlay hidden" id="main-menu-overlay">
+    <div class="modal" style="text-align:center">
+      <h2 style="margin-bottom:4px">Texas 42</h2>
+      <p class="mm-subtitle">Classic domino trick-taking game</p>
+      <button class="btn btn-primary mm-btn" onclick="showSoloMenu()">🎲 Play Solo</button>
+      <button class="btn btn-secondary mm-btn" onclick="showMpLobby()">🌐 Play Multiplayer</button>
+    </div>
+  </div>
+
+  <!-- Multiplayer lobby: name + create/join -->
+  <div class="overlay hidden" id="mp-lobby-overlay">
+    <div class="modal">
+      <h2 style="margin-bottom:16px">Multiplayer</h2>
+
+      <label class="mp-input-label">Your Name</label>
+      <input id="mp-name-input" class="mp-input" type="text" maxlength="16"
+        placeholder="Enter your name…" style="margin-bottom:14px">
+
+      <label class="mp-input-label">Game Length</label>
+      <div class="gl-grid" style="margin-bottom:16px">
+        <button class="gl-btn" id="mp-gl-onehand" onclick="mpSelectGameLength('onehand')">1 Hand</button>
+        <button class="gl-btn" id="mp-gl-3"       onclick="mpSelectGameLength('3')">3 Marks</button>
+        <button class="gl-btn" id="mp-gl-5"       onclick="mpSelectGameLength('5')">5 Marks</button>
+        <button class="gl-btn active" id="mp-gl-7" onclick="mpSelectGameLength('7')">7 ⭐</button>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%;margin-bottom:10px" onclick="mpCreateRoom()">
+        Create Room
+      </button>
+
+      <div class="mp-divider">— or join with a code —</div>
+
+      <div class="mp-row" style="margin-bottom:4px">
+        <input id="mp-code-input" class="mp-input mp-code-input" type="text"
+          maxlength="4" placeholder="1234" oninput="this.value=this.value.replace(/\D/g,'')">
+        <button class="btn btn-secondary" onclick="mpJoinRoom()" style="white-space:nowrap">Join Room</button>
+      </div>
+
+      <div class="mp-error" id="mp-lobby-error"></div>
+
+      <button class="btn btn-secondary btn-sm mp-back-btn" style="width:100%" onclick="showMainMenu()">
+        ← Back
+      </button>
+    </div>
+  </div>
+
+  <!-- Waiting room: room code + player slots -->
+  <div class="overlay hidden" id="mp-waiting-overlay">
+    <div class="modal">
+      <h2 style="margin-bottom:4px">Waiting Room</h2>
+      <div style="font-size:11px;color:#b09090;margin-bottom:6px;text-align:center">
+        Share this code with friends
+      </div>
+      <div id="mp-room-code-display" onclick="mpCopyCode()" title="Tap to copy">----</div>
+      <div id="mp-player-slots"></div>
+      <button class="btn btn-primary" id="mp-start-btn" style="width:100%;padding:16px;display:none" onclick="mpStartGame()">
+        Start Game
+      </button>
+      <div id="mp-waiting-msg" style="text-align:center;color:#b09090;font-size:13px;animation:mpPulse 2s ease-in-out infinite">
+        Waiting for host to start…
+      </div>
+      <p class="mp-start-info" id="mp-start-info" style="display:none">
+        AI will fill any empty seats
+      </p>
+      <button class="btn btn-secondary btn-sm" style="width:100%;margin-top:12px" onclick="mpLeaveRoom()">
+        Leave Room
+      </button>
+    </div>
+  </div>
+
 </div>
 
 <script>
+// ============ FEATURE FLAGS ============
+const MULTIPLAYER_ENABLED = false; // Set to true when backend is ready
+
 // ============ SOUNDS ============
 const Sound = (() => {
   let ctx = null;
@@ -791,6 +938,7 @@ updateSettingsUI();
 const SAVE_KEY = 'texas42_save';
 
 function saveGame(phase, extra) {
+  if (mpMode) return; // server is authoritative in multiplayer
   if (gameOver) return;
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(Object.assign({
@@ -925,6 +1073,19 @@ let gsBidsSet = [0,0,0,0];
 let gsTricksWon = [0,0,0,0];
 let gsHighestBid = 0;
 let gsHighestBidder = -1;
+
+// ============ MULTIPLAYER STATE ============
+let mpMode = false;          // true when in a multiplayer game
+let mpSocket = null;         // Socket.io instance
+let mpRoomCode = null;
+let mpMySeat = -1;           // 0-3: my seat at the table
+let mpMyHand = [];           // my private hand from server
+let mpPlayerNames = ['Player 1','Player 2','Player 3','Player 4'];
+let mpIsHost = false;
+let mpPublicState = {};      // last server-broadcast state
+let mpGameLength = '7';
+let mpLegalPlays = [];       // set by 'your_turn' event
+let mpEarlyEndVoted = false;
 
 // ============ DOMINO HELPERS ============
 function allDominoes() {
@@ -1076,6 +1237,7 @@ function hideMessage() {
 }
 
 function renderHands() {
+  if (mpMode) { mpRenderHand(); mpRenderOpponentCounts(mpPublicState.handCounts || [7,7,7,7]); return; }
   const southEl = document.getElementById('hand-south');
   southEl.innerHTML = '';
   const legalPlays = (currentPlayer === 0 && trickNum > 0 || (currentPlayer === 0 && leader === 0))
@@ -1105,6 +1267,7 @@ function renderHands() {
 }
 
 function renderTrick() {
+  if (mpMode) { mpRenderTrick(); return; }
   const positions = ['south','north','west','east'];
   const playerMap = [0, 2, 1, 3];
   positions.forEach((pos, i) => {
@@ -1120,8 +1283,9 @@ function renderTrick() {
 
 function showTrumpIndicator() {
   const names = ['Blanks','Ones','Twos','Threes','Fours','Fives','Sixes','Doubles'];
+  const playerLabel = mpMode ? mpGetName(bidWinner) : PLAYER_NAMES[bidWinner];
   document.getElementById('bt-label').textContent = 'Bid / Trump';
-  document.getElementById('bt-value').textContent = currentBid + ' by ' + PLAYER_NAMES[bidWinner] + ' · ' + names[trumpSuit];
+  document.getElementById('bt-value').textContent = currentBid + ' by ' + playerLabel + ' · ' + names[trumpSuit];
 }
 
 function hideTrumpIndicator() {
@@ -1309,6 +1473,7 @@ function updateTargetLabel() {
 function rematch() {
   document.getElementById('win-overlay').classList.add('hidden');
   document.getElementById('gameover-overlay').classList.add('hidden');
+  if (mpMode) { mpSocket.emit('rematch'); return; }
   clearSave();
   PLAYER_NAMES[2] = PERSONALITIES[partnerPersonality].short;
   const _pl = document.getElementById('partner-label');
@@ -1352,15 +1517,19 @@ function getAiBid(bidder, strength, highestBid) {
 function updateBidHistoryDisplay() {
   const el = document.getElementById('bid-history');
   if (!el) return;
-  const order = [(dealer+1)%4, (dealer+2)%4, (dealer+3)%4, dealer];
+  const _d = mpMode ? (mpPublicState.dealer !== undefined ? mpPublicState.dealer : dealer) : dealer;
+  const _bh = mpMode ? (mpPublicState.bidHistory || [null,null,null,null]) : bidHistory;
+  const _bw = mpMode ? (mpPublicState.bidWinner !== undefined ? mpPublicState.bidWinner : bidWinner) : bidWinner;
+  const order = [(_d+1)%4, (_d+2)%4, (_d+3)%4, _d];
   const parts = order.map(i => {
-    const name = PLAYER_NAMES[i];
-    const b = bidHistory[i];
+    const name = mpMode ? mpGetName(i) : PLAYER_NAMES[i];
+    const b = _bh[i];
     const val = b===null ? '—' : b==='pass' ? 'Pass' : b;
-    const hi = b!==null && b!=='pass' && bidWinner===i;
+    const hi = b!==null && b!=='pass' && _bw===i;
     return `<span class="bh-entry${hi?' bh-high':''}">${name}: <b>${val}</b>${hi?' ⭐':''}</span>`;
   });
-  el.innerHTML = `<span class="bh-label">${PLAYER_NAMES[dealer]} deals</span>` +
+  const dealerName = mpMode ? mpGetName(_d) : PLAYER_NAMES[_d];
+  el.innerHTML = `<span class="bh-label">${dealerName} deals</span>` +
     parts.join('<span class="bh-sep"> │ </span>');
 }
 function showBidHistory() {
@@ -1431,6 +1600,7 @@ function showHumanBidUI() {
 function humanBid(val) {
   Sound.click();
   document.getElementById('bid-overlay').classList.add('hidden');
+  if (mpMode) { mpSocket.emit('place_bid', { amount: val }); return; }
   if (val>0) { const prevHighestBid=highestBid; bids[0]=val; highestBid=val; bidWinner=0; bidHistory[0]=val; showMessage('You bid '+val); if (val===30 && !(passCount===3 && prevHighestBid===0)) Voice.anyoneCanMake30(); }
   else { bids[0]=0; passCount++; bidHistory[0]='pass'; showMessage('You pass'); if (highestBid===0) Voice.bidRibbing(); }
   updateBidHistoryDisplay();
@@ -1471,8 +1641,9 @@ function showTrumpUI() {
     btn.className='trump-btn'; btn.textContent=_icons[i]+' '+name;
     btn.onclick=(function(n,idx){return function(){
       Sound.ding();
-      trumpSuit=idx;
       document.getElementById('trump-overlay').classList.add('hidden');
+      if (mpMode) { mpSocket.emit('select_trump', { suit: idx }); return; }
+      trumpSuit=idx;
       showMessage('You call '+n);
       showTrumpIndicator();
       setTimeout(()=>startPlay(),800);
@@ -1516,7 +1687,17 @@ function playTurn() {
   else{setTimeout(()=>aiPlay(currentPlayer),600);}
 }
 
-function humanPlay(d){if(currentPlayer!==0)return;playDomino(0,d);}
+function humanPlay(d){
+  if (mpMode) {
+    // Prevent double-tap
+    if (!mpLegalPlays.some(lp=>lp[0]===d[0]&&lp[1]===d[1])) return;
+    mpLegalPlays=[]; mpRenderHand();
+    mpSocket.emit('play_domino',{domino:d});
+    return;
+  }
+  if(currentPlayer!==0)return;
+  playDomino(0,d);
+}
 
 function getAiReason(player, choice, legal) {
   const name = PLAYER_NAMES[player];
@@ -1890,6 +2071,7 @@ function endHand() {
 
 function nextHand(){
   document.getElementById('result-overlay').classList.add('hidden');
+  if (mpMode) { mpSocket.emit('next_hand'); return; }
   dealer=(dealer+1)%4; dealAndStart();
 }
 
@@ -1928,8 +2110,8 @@ function dealAndStart(){
   setTimeout(()=>startBidding(),1000);
 }
 
-// Init: always show start screen with partner selection
-try {
+// Build the solo start overlay (without showing it)
+function _buildStartOverlay() {
   const _initSave = loadSave();
   const overlay = document.getElementById('start-overlay');
   const resumeHTML = _initSave
@@ -1963,14 +2145,580 @@ try {
   const dealLabel = _initSave ? '\uD83C\uDFB2 New Game' : '\uD83C\uDFB2 Deal \'Em!';
   overlay.innerHTML = '<div class="modal"><h2>Texas 42</h2>' + resumeHTML + partnerHTML + glHTML +
     '<button class="btn btn-primary" onclick="startGame()" style="margin-top:2px">' + dealLabel + '</button></div>';
-  overlay.classList.remove('hidden');
   if (_initSave) {
     const clearRow = document.getElementById('clear-save-row');
     if (clearRow) clearRow.style.display = 'flex';
   }
   initPartnerUI();
   initGameLengthUI();
+}
+
+// Show the solo start screen (called from main menu "Play Solo" button)
+function showSoloMenu() {
+  document.getElementById('main-menu-overlay').classList.add('hidden');
+  document.getElementById('start-overlay').classList.remove('hidden');
+}
+
+// Init: show main menu (MP enabled) or jump straight to solo (MP disabled)
+try {
+  _buildStartOverlay();
+  if (MULTIPLAYER_ENABLED) {
+    document.getElementById('main-menu-overlay').classList.remove('hidden');
+  } else {
+    // Skip main menu — go directly to solo start screen
+    document.getElementById('start-overlay').classList.remove('hidden');
+    // Append a subtle "coming soon" notice inside the solo modal
+    const _modal = document.querySelector('#start-overlay .modal');
+    if (_modal) {
+      const _notice = document.createElement('div');
+      _notice.style.cssText = 'font-size:10px;color:#8a6868;text-align:center;margin-top:10px;letter-spacing:0.3px;';
+      _notice.textContent = '🌐 Multiplayer coming soon!';
+      _modal.appendChild(_notice);
+    }
+  }
 } catch(e) { document.body.innerHTML='<p style="color:red;padding:20px;">Error: '+e.message+'</p>'; }
+
+// ============ MULTIPLAYER CLIENT ============
+
+// ----- Navigation -----
+
+function showMainMenu() {
+  ['start-overlay','mp-lobby-overlay','mp-waiting-overlay'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  });
+  document.getElementById('main-menu-overlay').classList.remove('hidden');
+}
+
+function showMpLobby() {
+  document.getElementById('main-menu-overlay').classList.add('hidden');
+  document.getElementById('mp-lobby-overlay').classList.remove('hidden');
+  document.getElementById('mp-lobby-error').textContent = '';
+}
+
+function mpSelectGameLength(val) {
+  mpGameLength = val;
+  ['onehand','3','5','7'].forEach(k => {
+    const b = document.getElementById('mp-gl-' + k);
+    if (b) b.classList.toggle('active', k === val);
+  });
+}
+
+function mpShowLobbyError(msg) {
+  const el = document.getElementById('mp-lobby-error');
+  if (el) el.textContent = msg;
+}
+
+// ----- Socket.io Dynamic Load -----
+
+function initMultiplayer(callback) {
+  if (window.io) { callback(); return; }
+  const script = document.createElement('script');
+  script.src = '/socket.io/socket.io.js'; // served automatically by Socket.io
+  script.onload = callback;
+  script.onerror = () => mpShowLobbyError('Could not load multiplayer. Is the server running?');
+  document.head.appendChild(script);
+}
+
+// ----- Create / Join / Start -----
+
+function mpCreateRoom() {
+  const name = (document.getElementById('mp-name-input').value || '').trim();
+  if (!name) { mpShowLobbyError('Please enter your name.'); return; }
+  mpShowLobbyError('');
+  initMultiplayer(() => {
+    mpSocket = io();
+    mpMode = true;
+    mpIsHost = true;
+    mpAttachListeners();
+    mpSocket.emit('create_room', { name, gameLength: mpGameLength });
+  });
+}
+
+function mpJoinRoom() {
+  const name = (document.getElementById('mp-name-input').value || '').trim();
+  const code = (document.getElementById('mp-code-input').value || '').trim();
+  if (!name) { mpShowLobbyError('Please enter your name.'); return; }
+  if (code.length !== 4) { mpShowLobbyError('Enter a 4-digit room code.'); return; }
+  mpShowLobbyError('');
+  initMultiplayer(() => {
+    mpSocket = io();
+    mpMode = true;
+    mpIsHost = false;
+    mpAttachListeners();
+    mpSocket.emit('join_room', { code, name });
+  });
+}
+
+function mpStartGame() {
+  if (mpSocket && mpIsHost) mpSocket.emit('start_game');
+}
+
+function mpLeaveRoom() {
+  if (mpSocket) { mpSocket.disconnect(); mpSocket = null; }
+  mpMode = false; mpMySeat = -1; mpRoomCode = null;
+  mpMyHand = []; mpLegalPlays = [];
+  document.getElementById('mp-waiting-overlay').classList.add('hidden');
+  showMainMenu();
+}
+
+function mpCopyCode() {
+  if (!mpRoomCode) return;
+  navigator.clipboard?.writeText(mpRoomCode).then(() => showShareToast('Code copied! 📋'));
+}
+
+// ----- Waiting Room -----
+
+function mpRenderWaitingRoom(players) {
+  const container = document.getElementById('mp-player-slots');
+  if (!container) return;
+  container.innerHTML = '';
+  for (let seat = 0; seat < 4; seat++) {
+    const p = players.find(pl => pl.seat === seat);
+    const slot = document.createElement('div');
+    slot.className = 'mp-player-slot ' + (p ? 'filled' : 'empty');
+    if (p) {
+      const isMe = p.socketId === undefined ? false : true; // can't know without tracking
+      slot.innerHTML =
+        '<span class="mp-slot-icon">🎲</span>' +
+        '<span class="mp-slot-name">' + p.name + '</span>' +
+        (seat === 0 ? '<span class="mp-slot-badge">HOST</span>' : '');
+    } else {
+      slot.innerHTML =
+        '<span class="mp-slot-icon">⌛</span>' +
+        '<span class="mp-slot-name" style="color:#6a5858">Empty — AI fills</span>';
+    }
+    container.appendChild(slot);
+  }
+}
+
+// ----- View Rotation -----
+
+// My perspective: I'm always south (viewDir=0).
+// viewDir 0=south, 1=west, 2=north, 3=east
+function mpViewSeat(actualSeat) { return (actualSeat - mpMySeat + 4) % 4; }
+function mpActualSeat(viewDir)   { return (viewDir + mpMySeat) % 4; }
+function mpGetName(seat) {
+  if (seat === mpMySeat) return 'You';
+  return mpPlayerNames[seat] || ('Player ' + (seat + 1));
+}
+
+// ----- Rendering -----
+
+function mpRenderHand() {
+  const southEl = document.getElementById('hand-south');
+  if (!southEl) return;
+  southEl.innerHTML = '';
+  const isMyTurn = mpPublicState.currentPlayer === mpMySeat && mpPublicState.phase === 'playing';
+  mpMyHand.forEach(d => {
+    const isPlayable = isMyTurn && mpLegalPlays.some(lp => lp[0] === d[0] && lp[1] === d[1]);
+    const el = createDominoEl(d, false, false, isPlayable, isPlayable ? () => humanPlay(d) : null, false);
+    southEl.appendChild(el);
+  });
+  const label = document.querySelector('#hand-area .hand-label');
+  if (label) label.textContent = 'Your Hand (' + mpMyHand.length + ')';
+}
+
+function mpRenderOpponentCounts(handCounts) {
+  // viewDir 1=west, 2=north, 3=east
+  [['west',1],['north',2],['east',3]].forEach(([pos, viewDir]) => {
+    const actualSeat = mpActualSeat(viewDir);
+    const count = (handCounts && handCounts[actualSeat]) || 0;
+    const el = document.getElementById('hand-' + pos);
+    if (!el) return;
+    el.innerHTML = '';
+    for (let i = 0; i < count; i++) {
+      const tile = document.createElement('div');
+      tile.className = 'mini-tile';
+      el.appendChild(tile);
+    }
+  });
+}
+
+function mpRenderTrick() {
+  // DOM positions south=0, west=1, north=2, east=3
+  const posNames = ['south','west','north','east'];
+  posNames.forEach((pos, viewDir) => {
+    const actualSeat = mpActualSeat(viewDir);
+    const el = document.getElementById('trick-' + pos);
+    if (!el) return;
+    el.innerHTML = '';
+    const domino = mpPublicState.currentTrick ? mpPublicState.currentTrick[actualSeat] : null;
+    if (domino) {
+      const horizontal = (pos === 'west' || pos === 'east');
+      el.appendChild(createDominoEl(domino, false, horizontal, false, null, true));
+    }
+  });
+}
+
+function mpRenderNameTags() {
+  document.querySelectorAll('.mp-name-tag').forEach(el => el.remove());
+  if (!mpMode || mpMySeat < 0) return;
+  const trickArea = document.getElementById('trick-area');
+  if (!trickArea) return;
+  const posNames = ['south','west','north','east'];
+  posNames.forEach((pos, viewDir) => {
+    const actualSeat = mpActualSeat(viewDir);
+    const name = mpGetName(actualSeat);
+    const isActive = mpPublicState.currentPlayer === actualSeat;
+    const tag = document.createElement('div');
+    tag.className = 'mp-name-tag' + (isActive ? ' active' : '');
+    tag.id = 'mp-name-' + pos;
+    tag.textContent = name;
+    trickArea.appendChild(tag);
+  });
+
+  // Also update opponent area labels
+  [['west',1],['north',2],['east',3]].forEach(([pos, viewDir]) => {
+    const actualSeat = mpActualSeat(viewDir);
+    const name = mpGetName(actualSeat);
+    const opp = document.querySelector('#opp-' + pos + ' .opp-label, .opponent[data-pos="' + pos + '"] .opp-label');
+    if (opp) opp.textContent = name;
+  });
+}
+
+function mpApplyGameState(ps) {
+  // Mirror server state into globals used by existing render functions
+  marksUs   = ps.marksUs;
+  marksThem = ps.marksThem;
+  handPointsUs  = ps.handPointsUs;
+  handPointsThem = ps.handPointsThem;
+  trickCountUs  = ps.trickCountUs;
+  trickCountThem = ps.trickCountThem;
+  trumpSuit    = ps.trumpSuit;
+  currentBid   = ps.currentBid;
+  bidWinner    = ps.bidWinner;
+  dealer       = ps.dealer;
+  leader       = ps.leader;
+  currentPlayer = ps.currentPlayer;
+  ledSuit      = ps.ledSuit;
+  trickNum     = ps.trickNum;
+  currentTrick = ps.currentTrick || [null,null,null,null];
+  highestBid   = ps.highestBid;
+  bidHistory   = ps.bidHistory || [null,null,null,null];
+  passCount    = ps.passCount || 0;
+
+  updateScoreboard();
+  if (ps.trumpSuit !== -1) showTrumpIndicator(); else hideTrumpIndicator();
+
+  const lsi = document.getElementById('led-suit-indicator');
+  if (ps.ledSuit !== -1 && ps.phase === 'playing') updateLedSuitIndicator();
+  else if (lsi) lsi.style.display = 'none';
+
+  mpRenderHand();
+  mpRenderTrick();
+  mpRenderOpponentCounts(ps.handCounts);
+  mpRenderNameTags();
+
+  // Bid history bar
+  if (ps.phase === 'bidding' || (ps.bidHistory && ps.bidHistory.some(b => b !== null))) {
+    updateBidHistoryDisplay();
+    showBidHistory();
+  } else {
+    hideBidHistory();
+  }
+
+  // Waiting bar
+  mpUpdateWaitingBar(ps);
+}
+
+function mpUpdateWaitingBar(ps) {
+  // Remove old bar
+  const old = document.getElementById('mp-waiting-bar');
+  if (old) old.remove();
+
+  if (ps.currentPlayer < 0 || ps.currentPlayer === mpMySeat) return;
+  if (ps.phase === 'hand_result' || ps.phase === 'game_over') return;
+
+  const bar = document.createElement('div');
+  bar.id = 'mp-waiting-bar';
+  bar.className = 'mp-waiting-bar';
+  bar.textContent = 'Waiting for ' + mpGetName(ps.currentPlayer) + '…';
+  document.getElementById('game-container').appendChild(bar);
+}
+
+// ----- Disconnect Banner -----
+
+function mpShowDisconnectBanner(msg) {
+  let banner = document.getElementById('mp-disconnect-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'mp-disconnect-banner';
+    banner.className = 'mp-disconnect-banner';
+    document.getElementById('game-container').appendChild(banner);
+  }
+  banner.textContent = msg;
+}
+
+function mpHideDisconnectBanner() {
+  const b = document.getElementById('mp-disconnect-banner');
+  if (b) b.remove();
+}
+
+function mpAttemptReconnect() {
+  let attempts = 0;
+  const tryReconnect = () => {
+    if (attempts >= 10 || !mpRoomCode || mpMySeat < 0 || !mpSocket) return;
+    attempts++;
+    const name = mpPlayerNames[mpMySeat] || 'Player';
+    mpSocket.emit('reconnect_room', { code: mpRoomCode, seat: mpMySeat, name });
+    setTimeout(tryReconnect, 3000);
+  };
+  setTimeout(tryReconnect, 1500);
+}
+
+// ----- Build hand summary from server data (for showHandSummary reuse) -----
+
+function mpApplyHandSummary(summary) {
+  // Populate the globals that showHandSummary reads
+  bidWinner    = summary.bidWinner;
+  currentBid   = summary.currentBid;
+  trumpSuit    = summary.trumpSuit;
+  handPointsUs  = summary.totalUs;
+  handPointsThem = summary.totalThem;
+  trickCountUs  = 0; trickCountThem = 0;
+  marksUs      = summary.marksUs;
+  marksThem    = summary.marksThem;
+  playerTricksWon = summary.playerTricksWon || [0,0,0,0];
+  countCapturedUs   = summary.countCapturedUs || 0;
+  countCapturedThem = summary.countCapturedThem || 0;
+  trickLog     = summary.trickLog || [];
+  // Build a hand log entry so showHandSummary can render
+  const entry = {
+    handNumber: handNumber || 1,
+    bidWinner: summary.bidWinner, currentBid: summary.currentBid,
+    trumpSuit: summary.trumpSuit, totalUs: summary.totalUs, totalThem: summary.totalThem,
+    bidTeamMade: summary.bidTeamMade, bidTeamIsUs: summary.bidTeamIsUs,
+    marksUs: summary.marksUs, marksThem: summary.marksThem,
+    playerTricksWon: summary.playerTricksWon || [0,0,0,0],
+    countCapturedUs: summary.countCapturedUs || 0,
+    countCapturedThem: summary.countCapturedThem || 0,
+    trickLog: summary.trickLog || []
+  };
+  gameHandLog.push(entry);
+  handNumber = (handNumber || 0) + 1;
+  document.getElementById('result-text') && (document.getElementById('result-text').textContent = summary.resultText || '');
+  updateScoreboard();
+}
+
+// ----- Socket Listeners -----
+
+function mpAttachListeners() {
+
+  mpSocket.on('room_update', ({ code, players, phase }) => {
+    mpRoomCode = code;
+    document.getElementById('mp-lobby-overlay').classList.add('hidden');
+    document.getElementById('mp-waiting-overlay').classList.remove('hidden');
+    document.getElementById('mp-room-code-display').textContent = code;
+    mpRenderWaitingRoom(players);
+
+    const startBtn = document.getElementById('mp-start-btn');
+    const waitMsg  = document.getElementById('mp-waiting-msg');
+    const startInfo = document.getElementById('mp-start-info');
+    if (mpIsHost) {
+      startBtn.style.display = 'block';
+      waitMsg.style.display = 'none';
+      if (startInfo) startInfo.style.display = 'block';
+    } else {
+      startBtn.style.display = 'none';
+      waitMsg.style.display = 'block';
+      if (startInfo) startInfo.style.display = 'none';
+    }
+  });
+
+  mpSocket.on('game_started', ({ mySeat, playerNames, gameLength: gl }) => {
+    mpMySeat = mySeat;
+    mpPlayerNames = playerNames;
+    mpGameLength = gl;
+    gameLength = gl; // keep in sync for updateTargetLabel
+    gameOver = false;
+    handNumber = 0; gameHandLog = [];
+    document.getElementById('mp-waiting-overlay').classList.add('hidden');
+    // Remove any disconnect banners from prior game
+    mpHideDisconnectBanner();
+    const bar = document.getElementById('mp-waiting-bar');
+    if (bar) bar.remove();
+    updateTargetLabel();
+    mpRenderNameTags();
+  });
+
+  mpSocket.on('hand_dealt', ({ hand }) => {
+    mpMyHand = hand;
+    mpLegalPlays = [];
+    mpRenderHand();
+  });
+
+  mpSocket.on('game_state', ({ publicState }) => {
+    mpPublicState = publicState;
+    mpApplyGameState(publicState);
+  });
+
+  mpSocket.on('your_turn', ({ action, legalPlays, highestBid: hb }) => {
+    if (action === 'bid') {
+      if (hb !== undefined) highestBid = hb;
+      showHumanBidUI();
+    } else if (action === 'trump') {
+      showTrumpUI();
+    } else if (action === 'play') {
+      mpLegalPlays = legalPlays || [];
+      mpRenderHand();
+    }
+  });
+
+  mpSocket.on('bid_placed', ({ player, playerName, amount, bids, highestBid: hb }) => {
+    bidHistory = bids;
+    highestBid = hb;
+    mpPublicState.bidHistory = bids;
+    mpPublicState.highestBid = hb;
+    mpPublicState.bidWinner  = amount > 0 ? player : mpPublicState.bidWinner;
+    const msg = amount > 0 ? playerName + ' bids ' + amount : playerName + ' passes';
+    showMessage(msg);
+    updateBidHistoryDisplay();
+  });
+
+  mpSocket.on('bidding_done', ({ winner, winnerName, bid }) => {
+    bidWinner = winner; currentBid = bid;
+    mpPublicState.bidWinner = winner; mpPublicState.currentBid = bid;
+    showMessage(winnerName + ' wins bid at ' + bid + '!');
+  });
+
+  mpSocket.on('trump_selected', ({ suit, player, playerName }) => {
+    const names = ['Blanks','Ones','Twos','Threes','Fours','Fives','Sixes','Doubles'];
+    trumpSuit = suit;
+    bidWinner = player;
+    mpPublicState.trumpSuit = suit;
+    showMessage(playerName + ' calls ' + names[suit]);
+    Sound.ding();
+    showTrumpIndicator();
+    hideBidHistory();
+    const bar = document.getElementById('mp-waiting-bar');
+    if (bar) bar.remove();
+  });
+
+  mpSocket.on('domino_played', ({ player, playerName, domino, currentTrick: ct, nextPlayer }) => {
+    Sound.tap();
+    mpPublicState.currentTrick = ct;
+    mpPublicState.currentPlayer = nextPlayer;
+    currentTrick = ct;
+    // Animate landing on rotated position
+    const viewDir = mpViewSeat(player);
+    const posNames = ['south','west','north','east'];
+    mpRenderTrick();
+    const slot = document.getElementById('trick-' + posNames[viewDir]);
+    if (slot && slot.firstChild) slot.firstChild.classList.add('landing');
+    hideMessage();
+    mpUpdateWaitingBar(mpPublicState);
+    mpRenderNameTags();
+  });
+
+  mpSocket.on('trick_resolved', ({ winner, winnerName, points, newLeader, countUs, countThem }) => {
+    const viewDir  = mpViewSeat(winner);
+    const posNames = ['south','west','north','east'];
+    const winSlot  = document.getElementById('trick-' + posNames[viewDir]);
+    if (winSlot && winSlot.firstChild) {
+      winSlot.firstChild.classList.remove('landing');
+      winSlot.firstChild.classList.add('winner-glow');
+    }
+    TEAM_US.includes(winner) ? Sound.chime() : Sound.neutral();
+
+    const el = document.getElementById('trick-winner');
+    el.textContent = winnerName + (winner === mpMySeat ? '' : '') + ' wins! (+' + points + ')';
+    el.style.display = 'block';
+    el.classList.remove('reveal'); void el.offsetWidth; el.classList.add('reveal');
+
+    const trickAreaEl = document.getElementById('trick-area');
+    trickAreaEl.classList.remove('trick-won'); void trickAreaEl.offsetWidth; trickAreaEl.classList.add('trick-won');
+
+    // Update score globals for scoreboard
+    if (TEAM_US.includes(winner)) { trickCountUs++; handPointsUs = countUs - trickCountUs; }
+    else { trickCountThem++; handPointsThem = countThem - trickCountThem; }
+    updateScoreboard();
+
+    leader = newLeader;
+    mpPublicState.leader = newLeader;
+    const bar = document.getElementById('mp-waiting-bar');
+    if (bar) bar.remove();
+  });
+
+  mpSocket.on('early_end_offer', ({ outcome }) => {
+    mpEarlyEndVoted = false;
+    const el = document.getElementById('trick-winner');
+    const bidTeamIsUs = TEAM_US.includes(bidWinner);
+    const w = outcome.made
+      ? (bidTeamIsUs ? 'Your mark!' : 'Opponents get a mark.')
+      : (bidTeamIsUs ? 'Set — opponents get a mark.' : 'Set — your mark!');
+    el.innerHTML = outcome.msg + '<br>' + w + '<br>';
+    const endBtn = document.createElement('button');
+    endBtn.className = 'btn btn-primary btn-sm'; endBtn.style.marginTop = '8px';
+    endBtn.textContent = 'End Hand';
+    endBtn.onclick = () => {
+      if (!mpEarlyEndVoted) { mpEarlyEndVoted = true; mpSocket.emit('accept_early_end'); el.innerHTML = ''; el.style.display = 'none'; }
+    };
+    const playBtn = document.createElement('button');
+    playBtn.className = 'btn btn-secondary btn-sm'; playBtn.style.marginTop = '8px'; playBtn.style.marginLeft = '6px';
+    playBtn.textContent = 'Play On';
+    playBtn.onclick = () => {
+      if (!mpEarlyEndVoted) { mpEarlyEndVoted = true; mpSocket.emit('decline_early_end'); el.innerHTML = ''; el.style.display = 'none'; }
+    };
+    el.appendChild(endBtn); el.appendChild(playBtn);
+    el.style.display = 'block';
+  });
+
+  mpSocket.on('hand_complete', ({ summary }) => {
+    document.getElementById('trick-winner').style.display = 'none';
+    const lsi = document.getElementById('led-suit-indicator');
+    if (lsi) lsi.style.display = 'none';
+    const bar = document.getElementById('mp-waiting-bar');
+    if (bar) bar.remove();
+    mpApplyHandSummary(summary);
+    if (summary.bidTeamIsUs) {
+      summary.bidTeamMade ? Sound.victory() : Sound.defeat();
+    } else {
+      summary.bidTeamMade ? Sound.defeat() : Sound.victory();
+    }
+    showHandSummary(false);
+  });
+
+  mpSocket.on('game_over', ({ winner, marksUs: mu, marksThem: mt }) => {
+    marksUs = mu; marksThem = mt;
+    const bar = document.getElementById('mp-waiting-bar');
+    if (bar) bar.remove();
+    if (winner === 'us') {
+      Sound.victory(); launchConfetti();
+      document.getElementById('win-title').textContent = mpGameLength === 'onehand' ? 'Hand Won! 🎲' : 'You Win!';
+      document.getElementById('win-score').textContent = mu + ' \u2013 ' + mt;
+      document.getElementById('win-detail').textContent = '';
+      document.getElementById('win-overlay').classList.remove('hidden');
+    } else {
+      Sound.defeat();
+      document.getElementById('gameover-title').textContent = mpGameLength === 'onehand' ? 'Hand Lost' : 'You Lose';
+      document.getElementById('gameover-text').textContent = 'Final: ' + mu + ' \u2013 ' + mt + ' marks.';
+      document.getElementById('gameover-overlay').classList.remove('hidden');
+    }
+    gameOver = true;
+  });
+
+  mpSocket.on('player_disconnected', ({ seat, name }) => {
+    mpShowDisconnectBanner(name + ' disconnected — AI taking over.');
+  });
+
+  mpSocket.on('player_reconnected', ({ seat, name }) => {
+    mpHideDisconnectBanner();
+    showMessage(name + ' reconnected!');
+  });
+
+  mpSocket.on('error', ({ message }) => {
+    mpShowLobbyError(message);
+    if (mpMySeat >= 0) showMessage('⚠ ' + message);
+  });
+
+  mpSocket.on('disconnect', () => {
+    if (mpMySeat >= 0 && mpRoomCode) {
+      mpShowDisconnectBanner('Connection lost — reconnecting…');
+      mpAttemptReconnect();
+    }
+  });
+}
 
 // ============ SHARE ============
 const SHARE_FORMAT_KEY = 'shareFormat';
