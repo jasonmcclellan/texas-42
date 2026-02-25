@@ -534,6 +534,18 @@ html, body {
 #mp-name-south { bottom: 2px; left: 50%; transform: translateX(-50%); }
 #mp-name-west  { left: 2px;   top: 50%;  transform: translateY(-50%); }
 #mp-name-east  { right: 2px;  top: 50%;  transform: translateY(-50%); }
+
+/* ===== DEBUG MODE ===== */
+#debug-badge {
+  position: fixed; top: calc(env(safe-area-inset-top, 0px) + 4px); right: 8px;
+  background: rgba(220,180,0,0.92); color: #1a0000;
+  font-size: 10px; font-weight: 700; border-radius: 8px;
+  padding: 2px 8px; z-index: 300; pointer-events: none; letter-spacing: 0.3px;
+}
+.debug-opp-text {
+  font-size: 11px; color: #ffd700; text-align: center;
+  margin-top: 3px; line-height: 1.5; word-break: break-all; padding: 0 3px;
+}
 </style>
 </head>
 <body>
@@ -696,6 +708,8 @@ html, body {
 
   <canvas id="confetti-canvas"></canvas>
 
+  <div id="debug-badge" class="hidden">🐛 Debug</div>
+
   <!-- Settings Modal -->
   <div id="settings-overlay" class="hidden" onclick="if(event.target===this)closeSettings()">
     <div id="settings-modal">
@@ -707,6 +721,10 @@ html, body {
       <div class="settings-row">
         <span>Sound Effects</span>
         <button id="sound-setting-btn" class="toggle-btn" onclick="toggleSound()">ON</button>
+      </div>
+      <div class="settings-row">
+        <span>Debug Mode</span>
+        <button id="debug-setting-btn" class="toggle-btn off" onclick="toggleDebug()">OFF</button>
       </div>
       <div class="settings-row" id="clear-save-row" style="display:none">
         <span id="save-info-text">Saved game</span>
@@ -816,6 +834,8 @@ html, body {
 <script>
 // ============ FEATURE FLAGS ============
 const MULTIPLAYER_ENABLED = false; // Set to true when backend is ready
+const DEBUG_KEY = 'debugMode';
+let debugMode = localStorage.getItem(DEBUG_KEY) === 'true';
 
 // ============ SOUNDS ============
 const Sound = (() => {
@@ -922,14 +942,63 @@ function toggleAbout() {
   document.querySelector('.settings-about-btn').textContent =
     el.classList.contains('hidden') ? '▸ About Texas 42' : '▾ About Texas 42';
 }
+let _debugPendingPlay = null; // callback to invoke when Continue is clicked
+
+function debugPause(msg, callback) {
+  _debugPendingPlay = callback;
+  const bar = document.getElementById('message-bar');
+  if (!bar) return;
+  bar.classList.remove('hidden');
+  bar.innerHTML = '';
+  const txt = document.createElement('span');
+  txt.textContent = msg;
+  const btn = document.createElement('button');
+  btn.textContent = 'Continue ▶';
+  btn.style.cssText = 'margin-left:10px;background:rgba(212,175,55,0.85);color:#1a0000;' +
+    'border:none;border-radius:6px;padding:3px 12px;font-size:11px;font-weight:700;cursor:pointer;vertical-align:middle;';
+  btn.onclick = debugContinue;
+  bar.appendChild(txt);
+  bar.appendChild(btn);
+}
+
+function debugContinue() {
+  if (!_debugPendingPlay) return;
+  const cb = _debugPendingPlay;
+  _debugPendingPlay = null;
+  cb();
+}
+
+function toggleDebug() {
+  debugMode = !debugMode;
+  localStorage.setItem(DEBUG_KEY, String(debugMode));
+  updateSettingsUI();
+  const badge = document.getElementById('debug-badge');
+  if (badge) badge.classList.toggle('hidden', !debugMode);
+  // If turning off while paused, auto-continue so game doesn't stay frozen
+  if (!debugMode && _debugPendingPlay) debugContinue();
+  if (!mpMode) renderHands();
+}
+
+function splashToggleDebug() {
+  debugMode = !debugMode;
+  localStorage.setItem(DEBUG_KEY, String(debugMode));
+  const badge = document.getElementById('debug-badge');
+  if (badge) badge.classList.toggle('hidden', !debugMode);
+  const btn = document.getElementById('splash-debug-btn');
+  if (btn) { btn.textContent = debugMode ? 'ON' : 'OFF'; btn.classList.toggle('off', !debugMode); }
+  updateSettingsUI();
+}
+
 function updateSettingsUI() {
   const von = Voice.isEnabled(), son = Sound.isEnabled();
   const vBtn = document.getElementById('voice-setting-btn');
   const sBtn = document.getElementById('sound-setting-btn');
   const vtBtn = document.getElementById('voice-toggle');
+  const dbBtn = document.getElementById('debug-setting-btn');
   if (vBtn) { vBtn.textContent = von ? 'ON' : 'OFF'; vBtn.classList.toggle('off', !von); }
   if (sBtn) { sBtn.textContent = son ? 'ON' : 'OFF'; sBtn.classList.toggle('off', !son); }
   if (vtBtn) { vtBtn.textContent = von ? '🔊' : '🔇'; vtBtn.classList.toggle('voice-off', !von); }
+  if (dbBtn) { dbBtn.textContent = debugMode ? 'ON' : 'OFF'; dbBtn.classList.toggle('off', !debugMode); }
 }
 // Initialize UI state from stored preferences
 updateSettingsUI();
@@ -1252,17 +1321,23 @@ function renderHands() {
     southEl.appendChild(el);
   });
 
-  // Opponents as mini tiles
+  // Opponents as mini tiles (face values shown in debug mode)
   ['west','north','east'].forEach((pos, pi) => {
     const pIdx = [1, 2, 3][pi];
     const el = document.getElementById('hand-' + pos);
     el.innerHTML = '';
-    hands[pIdx].forEach((_, i) => {
+    hands[pIdx].forEach((d, i) => {
       const tile = document.createElement('div');
       tile.className = 'mini-tile';
       if (isDealing) { tile.classList.add('deal-in'); tile.style.animationDelay = ((dealIdx + i) * 0.07) + 's'; }
       el.appendChild(tile);
     });
+    if (debugMode && hands[pIdx].length > 0) {
+      const dbg = document.createElement('div');
+      dbg.className = 'debug-opp-text';
+      dbg.textContent = hands[pIdx].map(domName).join(' | ');
+      el.appendChild(dbg);
+    }
     dealIdx += hands[pIdx].length;
   });
 }
@@ -1329,6 +1404,47 @@ function evaluateHand(hand) {
   });
   Object.values(sc).forEach(c => { if(c>=3) s+=3; if(c>=5) s+=4; });
   return s;
+}
+
+// Estimate expected team score (out of 42) if this player bids with the given trump.
+// Returns a number roughly in the 15-42 range; bid minimum is 30.
+function evaluateBiddingPower(hand, trumpSuit) {
+  const trumpTiles = hand.filter(d => isTrump(d, trumpSuit));
+
+  // Control: does this player hold the highest trump (the double)?
+  const hasDouble = trumpSuit === 7
+    ? hand.some(d => d[0] === d[1] && d[0] >= 5)        // doubles trump: 5-5 or 6-6
+    : hand.some(d => d[0] === trumpSuit && d[1] === trumpSuit);
+
+  // Tricks YOUR hand will likely win
+  let myTricks = hasDouble
+    ? Math.min(trumpTiles.length, 5)                     // control → win most trump
+    : Math.max(0, Math.floor(trumpTiles.length * 0.4));  // vulnerable without the double
+
+  // Off-suit trick potential (not applicable for doubles trump)
+  if (trumpSuit !== 7) {
+    const suitMap = {};
+    hand.filter(d => !isTrump(d, trumpSuit)).forEach(d => {
+      const s = getSuit(d, trumpSuit);
+      if (!suitMap[s]) suitMap[s] = [];
+      suitMap[s].push(d);
+    });
+    Object.values(suitMap).forEach(tiles => {
+      if (tiles.some(d => d[0] === d[1])) myTricks += 0.5; // double = likely trick
+      if (tiles.length >= 3)              myTricks += 0.5; // long suit
+    });
+  }
+  myTricks = Math.min(myTricks, 6); // partner should win some tricks too
+
+  // Count points you'll likely capture in the tricks you win
+  const myCount      = hand.reduce((s, d) => s + countingPoints(d), 0);
+  const captureRate  = hasDouble ? 0.75 : 0.40;
+  const myCaptured   = myCount * captureRate;
+
+  // Average contribution expected from your partner
+  const partnerAvg = 22;
+
+  return Math.floor(myTricks + myCaptured + partnerAvg);
 }
 
 function chooseBestTrump(hand) {
@@ -1530,31 +1646,39 @@ function rematch() {
   dealAndStart();
 }
 
-function getAiBid(bidder, strength, highestBid) {
+function getAiBid(bidder, hand, highestBid) {
   const pers = bidder === 2 ? partnerPersonality : 'eddie';
+
+  // Find the trump that maximises expected team score
+  let bestExpected = 0;
+  for (let suit = 0; suit <= 7; suit++) {
+    const exp = evaluateBiddingPower(hand, suit);
+    if (exp > bestExpected) bestExpected = exp;
+  }
+
+  // Personality: shift expected score up (optimism) or down (caution)
+  let bidTarget;
   if (pers === 'barbara') {
-    if (strength >= 7  && highestBid === 0) return 30;
-    if (strength >= 11 && highestBid < 32)  return Math.min(highestBid + 1, 32);
-    if (strength >= 14 && highestBid < 36)  return Math.min(highestBid + 1, 36);
-    if (strength >= 18 && highestBid < 40)  return Math.min(highestBid + 1, 40);
-    if (strength >= 22)                      return Math.min(highestBid + 1, 42);
-    return 0;
+    bidTarget = bestExpected + 2 + Math.floor(Math.random() * 2); // +2-3 optimistic
+  } else if (pers === 'carl') {
+    bidTarget = bestExpected - 1;                                  // -1 conservative
+  } else {
+    bidTarget = bestExpected;                                      // eddie: realistic
   }
-  if (pers === 'carl') {
-    if (strength >= 14 && highestBid === 0) return 30;
-    if (strength >= 18 && highestBid < 31)  return 31;
-    if (strength >= 22 && highestBid < 33)  return Math.min(highestBid + 1, 33);
-    if (strength >= 27 && highestBid < 36)  return Math.min(highestBid + 1, 36);
-    if (strength >= 32)                      return Math.min(highestBid + 1, 42);
-    return 0;
+
+  // Opening bid (no one has bid yet)
+  if (highestBid === 0) {
+    if (bidTarget < 30) return 0; // not strong enough to open
+    return Math.min(bidTarget, 42);
   }
-  // Eddie: balanced
-  if (strength >= 10 && highestBid === 0) return 30;
-  if (strength >= 14 && highestBid < 31)  return 31;
-  if (strength >= 17 && highestBid < 33)  return Math.min(highestBid + 1, 33);
-  if (strength >= 21 && highestBid < 37)  return Math.min(highestBid + 1, 37);
-  if (strength >= 26)                      return Math.min(highestBid + 1, 42);
-  return 0;
+
+  // Competitive bid (someone already bid)
+  if (bidTarget <= highestBid) return 0; // can't beat current bid
+  const margin = bidTarget - highestBid;
+  if (pers === 'barbara' && margin >= 1) return Math.min(bidTarget, 42); // aggressive
+  if (pers === 'carl'    && margin >= 3) return highestBid + 1;          // cautious chase
+  if (margin >= 2)                       return Math.min(bidTarget, 42); // eddie: normal
+  return 0; // margin too slim — fold
 }
 
 function updateBidHistoryDisplay() {
@@ -1607,16 +1731,38 @@ function doBidRound(bidder) {
   if (bidder===0) { showHumanBidUI(); }
   else {
     setTimeout(() => {
-      const strength = evaluateHand(hands[bidder]);
-      let aiBid = getAiBid(bidder, strength, highestBid);
+      let aiBid = getAiBid(bidder, hands[bidder], highestBid);
+      let _bidMsg, _dbgMsg;
       if (aiBid>0 && aiBid>highestBid) {
         bids[bidder]=aiBid; highestBid=aiBid; bidWinner=bidder;
         bidHistory[bidder]=aiBid;
-        showMessage(PLAYER_NAMES[bidder]+' bids '+aiBid);
-      } else { bids[bidder]=0; passCount++; bidHistory[bidder]='pass'; showMessage(PLAYER_NAMES[bidder]+' passes'); }
+        if (debugMode) {
+          let bExp=0, bSuit=0;
+          for(let s=0;s<=7;s++){const e=evaluateBiddingPower(hands[bidder],s);if(e>bExp){bExp=e;bSuit=s;}}
+          const _SN=['Blanks','Ones','Twos','Threes','Fours','Fives','Sixes','Doubles'];
+          const _cnts=hands[bidder].filter(d=>countingPoints(d)>0).map(d=>domName(d)+'('+countingPoints(d)+')').join(', ')||'none';
+          _dbgMsg=`🐛 ${PLAYER_NAMES[bidder]} bids ${aiBid}: exp=${bExp} → ${_SN[bSuit]}, count=[${_cnts}]`;
+          console.log(_dbgMsg);
+        }
+        _bidMsg=PLAYER_NAMES[bidder]+' bids '+aiBid;
+      } else {
+        bids[bidder]=0; passCount++; bidHistory[bidder]='pass';
+        if (debugMode) {
+          let bExp=0;
+          for(let s=0;s<=7;s++){const e=evaluateBiddingPower(hands[bidder],s);if(e>bExp)bExp=e;}
+          _dbgMsg=`🐛 ${PLAYER_NAMES[bidder]} passes: best exp=${bExp} (need ≥30)`;
+          console.log(_dbgMsg);
+        }
+        _bidMsg=PLAYER_NAMES[bidder]+' passes';
+      }
       updateBidHistoryDisplay();
       bidsDone++;
-      setTimeout(()=>doBidRound((bidder+1)%4),600);
+      if (debugMode) {
+        debugPause(_dbgMsg, ()=>doBidRound((bidder+1)%4));
+      } else {
+        showMessage(_bidMsg);
+        setTimeout(()=>doBidRound((bidder+1)%4),600);
+      }
     },500);
   }
 }
@@ -1664,8 +1810,15 @@ function chooseTrump() {
     setTimeout(()=>{
       const bi=chooseBestTrump(hands[bidWinner]);
       trumpSuit=bi;
-      const names=['Blanks','Ones','Twos','Threes','Fours','Fives','Sixes','Doubles'];
-      showMessage(PLAYER_NAMES[bidWinner]+' calls '+names[trumpSuit]);
+      const _TN=['Blanks','Ones','Twos','Threes','Fours','Fives','Sixes','Doubles'];
+      if (debugMode) {
+        const _scores=[];
+        for(let s=0;s<=7;s++) _scores.push({s,e:evaluateBiddingPower(hands[bidWinner],s)});
+        _scores.sort((a,b)=>b.e-a.e);
+        const _top=_scores.slice(0,3).map(x=>_TN[x.s]+'='+x.e).join(', ');
+        const _dbgMsg=`🐛 ${PLAYER_NAMES[bidWinner]} calls ${_TN[bi]}: [${_top}]`;
+        console.log(_dbgMsg); showMessage(_dbgMsg);
+      } else { showMessage(PLAYER_NAMES[bidWinner]+' calls '+_TN[trumpSuit]); }
       Sound.ding();
       showTrumpIndicator();
       setTimeout(()=>startPlay(),1200);
@@ -1748,7 +1901,13 @@ function getAiReason(player, choice, legal) {
   if (ledSuit === -1) {
     const trumpTiles = legal.filter(d => isTrump(d, trumpSuit));
     if (trumpTiles.length >= 3 && isTrump(choice, trumpSuit)) {
-      return Math.random() < 0.7 ? `${name} leads trump to draw out opponents` : null;
+      const r = `${name} leads trump to draw out opponents`;
+      return (debugMode || Math.random() < 0.7) ? r : null;
+    }
+    if (debugMode) {
+      return isTrump(choice, trumpSuit)
+        ? `${name} leads ${domName(choice)} trump`
+        : `${name} leads ${domName(choice)} (best non-trump)`;
     }
     return null;
   }
@@ -1767,17 +1926,25 @@ function getAiReason(player, choice, legal) {
   }
   if (teamWinning && partnerWinning) {
     if (countingPoints(choice) > 0) {
-      return Math.random() < 0.65 ? `${name} loads count on partner's trick` : null;
+      const r = `${name} loads count on partner's trick`;
+      return (debugMode || Math.random() < 0.65) ? r : null;
     }
-    return Math.random() < 0.4 ? `${name} plays low, partner's got it` : null;
+    const r = `${name} plays low, partner's got it`;
+    return (debugMode || Math.random() < 0.4) ? r : null;
   }
   if (!teamWinning && !choiceIsTrump && followTiles.length > 0) {
     const winnerDom = currentTrick[winner];
     if (!isTrump(winnerDom, trumpSuit) &&
         suitRank(choice, ledSuit, trumpSuit) > suitRank(winnerDom, ledSuit, trumpSuit) &&
         countSoFar >= 5) {
-      return Math.random() < 0.6 ? `${name} plays high to win the trick` : null;
+      const r = `${name} plays high to win the trick`;
+      return (debugMode || Math.random() < 0.6) ? r : null;
     }
+  }
+  if (debugMode) {
+    // Fallback: always explain in debug mode
+    if (teamWinning) return `${name} plays ${domName(choice)} (team winning)`;
+    return `${name} plays ${domName(choice)} (ducking — no good play)`;
   }
   return null;
 }
@@ -1793,10 +1960,20 @@ function showAiToast(msg) {
 
 function aiPlay(player) {
   const legal=getLegalPlays(hands[player],ledSuit,trumpSuit);
-  if(legal.length===1){playDomino(player,legal[0]);return;}
+  if(legal.length===1){
+    if(debugMode){
+      const msg=`🐛 ${PLAYER_NAMES[player]} plays ${domName(legal[0])} (only legal play)`;
+      console.log(msg); debugPause(msg, player, legal[0]); return;
+    }
+    playDomino(player,legal[0]);return;
+  }
   const choice=ledSuit===-1?aiChooseLead(player,legal):aiChooseFollow(player,legal);
   const domino=choice||legal[0];
   const reason=getAiReason(player,domino,legal);
+  if(debugMode){
+    const msg='🐛 '+(reason||`${PLAYER_NAMES[player]} plays ${domName(domino)}`);
+    console.log(msg); debugPause(msg, player, domino); return;
+  }
   if(reason) showAiToast(reason);
   playDomino(player,domino);
 }
@@ -2146,6 +2323,8 @@ function startGame(){
 
 function dealAndStart(){
   handEnding = false;
+  const _nhBtn = document.querySelector('#result-overlay .btn-primary');
+  if (_nhBtn) _nhBtn.disabled = false;
   const tiles=shuffle(allDominoes());
   hands=[[],[],[],[]];
   for(let i=0;i<28;i++) hands[i%4].push(tiles[i]);
@@ -2192,8 +2371,16 @@ function _buildStartOverlay() {
     '<button class="gl-btn" id="gl-7" onclick="selectGameLength(\'7\')">7 \u2B50</button>' +
     '</div>';
   const dealLabel = _initSave ? '\uD83C\uDFB2 New Game' : '\uD83C\uDFB2 Deal \'Em!';
+  const _dbgRowHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;' +
+    'padding:8px 2px 0;margin-top:8px;border-top:1px solid rgba(232,206,206,0.1);' +
+    'font-size:12px;color:#b09090">' +
+    '<span>Debug Mode</span>' +
+    '<button id="splash-debug-btn" class="toggle-btn' + (debugMode ? '' : ' off') + '" ' +
+    'onclick="splashToggleDebug()">' + (debugMode ? 'ON' : 'OFF') + '</button></div>';
   overlay.innerHTML = '<div class="modal"><h2>Texas 42</h2>' + resumeHTML + partnerHTML + glHTML +
-    '<button class="btn btn-primary" onclick="startGame()" style="margin-top:2px">' + dealLabel + '</button></div>';
+    '<button class="btn btn-primary" onclick="startGame()" style="margin-top:2px">' + dealLabel + '</button>' +
+    _dbgRowHTML + '</div>';
   if (_initSave) {
     const clearRow = document.getElementById('clear-save-row');
     if (clearRow) clearRow.style.display = 'flex';
@@ -2211,6 +2398,10 @@ function showSoloMenu() {
 // Init: show main menu (MP enabled) or jump straight to solo (MP disabled)
 try {
   _buildStartOverlay();
+  if (debugMode) {
+    const _dbgBadge = document.getElementById('debug-badge');
+    if (_dbgBadge) _dbgBadge.classList.remove('hidden');
+  }
   if (MULTIPLAYER_ENABLED) {
     document.getElementById('main-menu-overlay').classList.remove('hidden');
   } else {
