@@ -1057,6 +1057,7 @@ let currentPlayer = -1;
 let trickNum = 0;
 let ledSuit = -1;
 let gameOver = false;
+let handEnding = false;
 let isDealing = false;
 // Per-hand tracking
 let trickLog = [];
@@ -1331,22 +1332,64 @@ function evaluateHand(hand) {
 }
 
 function chooseBestTrump(hand) {
+  // Control weights by rank position within the suit (7 tiles total per suit)
+  // Position 0 = strongest (double), descending from there
+  const WEIGHTS = [10, 8, 6, 4, 2, 1, 1];
   const scores = new Array(8).fill(0);
-  const highDoubles = hand.filter(d => d[0]===d[1] && d[0]>=4);
-  scores[7] = highDoubles.length>=2 ? highDoubles.reduce((s,d)=>s+d[0]*2,0) : -10;
-  for (let suit=0;suit<=6;suit++) {
-    const tiles = hand.filter(d=>d[0]===suit||d[1]===suit);
-    scores[suit] += tiles.length*3;
-    if (hand.some(d=>d[0]===suit&&d[1]===suit)) scores[suit]+=6;
-    tiles.forEach(d=>{
-      scores[suit]+=countingPoints(d)*0.4;
-      const other=d[0]===suit?d[1]:d[0];
-      scores[suit]+=other*0.2;
+  const heldKeys = new Set(hand.map(d => d[0] + '-' + d[1]));
+
+  // ---- Suits 0–6 ----
+  for (let suit = 0; suit <= 6; suit++) {
+    // Build the 7 tiles for this suit in trump-rank order (strongest first):
+    //   [suit,suit] is rank 20 (double),
+    //   then [suit,pip] ordered pip 6→0, skipping suit itself (rank = 7+pip)
+    const ranked = [[suit, suit]];
+    for (let pip = 6; pip >= 0; pip--) {
+      if (pip !== suit) ranked.push(pip < suit ? [pip, suit] : [suit, pip]);
+    }
+
+    // Sum weights for tiles actually held
+    let control = 0;
+    ranked.forEach((tile, pos) => {
+      if (heldKeys.has(tile[0] + '-' + tile[1])) control += WEIGHTS[pos];
     });
-    if (tiles.length<3) scores[suit]-=4;
+
+    const hasDouble  = heldKeys.has(suit + '-' + suit);
+    const tileCount  = hand.filter(d => d[0] === suit || d[1] === suit).length;
+    const isHighSuit = suit >= 4;
+
+    scores[suit] = control + tileCount; // depth bonus on top of control
+
+    // Missing-double penalty: severity depends on how much depth compensates
+    if (!hasDouble) {
+      if (isHighSuit) {
+        scores[suit] += control >= 18 ? -10 : -50;
+      } else {
+        scores[suit] += control >= 15 ? -5  : -20;
+      }
+    }
+
+    // Thin suit: fewer than 3 trump tiles is risky regardless of quality
+    if (tileCount < 3) scores[suit] -= 8;
   }
-  let best=0;
-  for(let i=1;i<8;i++) if(scores[i]>scores[best]) best=i;
+
+  // ---- Doubles trump (suit 7) ----
+  // Rank order: 6-6 strongest, down to 0-0
+  const doublesRanked = [[6,6],[5,5],[4,4],[3,3],[2,2],[1,1],[0,0]];
+  let doublesControl = 0;
+  doublesRanked.forEach((tile, pos) => {
+    if (heldKeys.has(tile[0] + '-' + tile[1])) doublesControl += WEIGHTS[pos];
+  });
+  scores[7] = doublesControl;
+
+  // Penalty if missing 6-6: need 5-5+4-4+3-3 depth to compensate lightly
+  if (!heldKeys.has('6-6')) {
+    const hasDepth = heldKeys.has('5-5') && heldKeys.has('4-4') && heldKeys.has('3-3');
+    scores[7] += hasDepth ? -10 : -50;
+  }
+
+  let best = 0;
+  for (let i = 1; i < 8; i++) if (scores[i] > scores[best]) best = i;
   return best;
 }
 
@@ -2026,6 +2069,8 @@ function showGameStats() {
 }
 
 function endHand() {
+  if (handEnding) return;
+  handEnding = true;
   document.getElementById('trick-winner').style.display='none';
   document.getElementById('led-suit-indicator').style.display='none';
   hideMessage();
@@ -2044,6 +2089,7 @@ function endHand() {
   updateScoreboard();
   const targetMarks=gameLength==='onehand'?1:parseInt(gameLength);
   if(marksUs>=targetMarks||marksThem>=targetMarks){
+    document.getElementById('result-overlay').classList.add('hidden');
     marksUs>=targetMarks?Sound.victory():Sound.defeat();
     if(marksUs>=targetMarks){
       document.getElementById('win-title').textContent=gameLength==='onehand'?'Hand Won! 🎲':'You Win!';
@@ -2070,6 +2116,8 @@ function endHand() {
 }
 
 function nextHand(){
+  const _nhBtn = document.querySelector('#result-overlay .btn-primary');
+  if (_nhBtn) _nhBtn.disabled = true;
   document.getElementById('result-overlay').classList.add('hidden');
   if (mpMode) { mpSocket.emit('next_hand'); return; }
   dealer=(dealer+1)%4; dealAndStart();
@@ -2097,6 +2145,7 @@ function startGame(){
 }
 
 function dealAndStart(){
+  handEnding = false;
   const tiles=shuffle(allDominoes());
   hands=[[],[],[],[]];
   for(let i=0;i<28;i++) hands[i%4].push(tiles[i]);
