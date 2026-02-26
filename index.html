@@ -577,7 +577,7 @@ html, body {
 .domino.face-down {
   background: #2d0000;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%232d0000'/%3E%3Cpolygon points='50,20 56,38 75,39 60,50 65,68 50,58 35,68 40,50 25,39 44,38' fill='%23e8cece' opacity='0.35'/%3E%3C/svg%3E");
-  background-size: 60%; background-repeat: no-repeat; background-position: center;
+  background-size: 22px 22px; background-repeat: no-repeat; background-position: center;
   border-color: #1a0000;
 }
 @keyframes dsoDeal {
@@ -606,7 +606,7 @@ html, body {
     <div id="bid-trump-info">
       <div class="label" id="bt-label"></div>
       <div class="value" id="bt-value"></div>
-      <div style="font-size:9px;color:#888;margin-top:2px;cursor:pointer;" onclick="openSettings()" title="Settings">v02.1 ⚙️</div>
+      <div style="font-size:9px;color:#888;margin-top:2px;cursor:pointer;" onclick="openSettings()" title="Settings">v02.2 ⚙️</div>
     </div>
     <div class="score-team">
       <div class="label">Opponents</div>
@@ -1188,13 +1188,15 @@ function saveGame(phase, extra) {
   if (gameOver) return;
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(Object.assign({
-      hands, marksUs, marksThem,
+      hands: hands.map(h => h.slice()),
+      marksUs, marksThem,
       handPointsUs, handPointsThem,
       trickCountUs, trickCountThem,
-      currentTrick, trickNum, ledSuit, leader, currentPlayer,
+      currentTrick: currentTrick.slice(),
+      trickNum, ledSuit, leader, currentPlayer,
       trumpSuit, currentBid, bidWinner, dealer,
       bids, bidsDone, highestBid, passCount,
-      partnerPersonality,
+      partnerPersonality, gameLength,
       phase, savedAt: Date.now()
     }, extra || {})));
   } catch(e) {}
@@ -1245,9 +1247,22 @@ function resumeGame() {
   highestBid = s.highestBid || 0;
   passCount = s.passCount || 0;
   partnerPersonality = s.partnerPersonality || 'eddie';
+  if (s.gameLength) gameLength = s.gameLength;
   PLAYER_NAMES[2] = PERSONALITIES[partnerPersonality].short;
   const _rpl = document.getElementById('partner-label');
   if (_rpl) _rpl.textContent = PERSONALITIES[partnerPersonality].short;
+
+  // Validate restored state before proceeding
+  const handsValid = Array.isArray(hands) && hands.length === 4 && hands.every(Array.isArray);
+  const phaseIsPlay = s.phase === 'playing' || s.phase === 'hand_result';
+  if (!handsValid || (phaseIsPlay && hands.flat().length === 0)) {
+    console.error('Restore failed: corrupted game state');
+    clearSave();
+    alert('Saved game was corrupted. Starting fresh.');
+    location.reload();
+    return;
+  }
+
   gameOver = false;
   document.getElementById('start-overlay').classList.add('hidden');
   renderHands();
@@ -1487,8 +1502,14 @@ function renderHands() {
   if (mpMode) { mpRenderHand(); mpRenderOpponentCounts(mpPublicState.handCounts || [7,7,7,7]); return; }
   const southEl = document.getElementById('hand-south');
   southEl.innerHTML = '';
-  const legalPlays = (currentPlayer === 0 && trickNum > 0 || (currentPlayer === 0 && leader === 0))
-    ? getLegalPlays(hands[0], ledSuit, trumpSuit) : [];
+
+  // When player has exactly 1 domino on their turn it is always the only legal play
+  const isMyTurn = currentPlayer === 0;
+  const forcePlayable = isMyTurn && hands[0].length === 1;
+  const legalPlays = forcePlayable
+    ? hands[0]
+    : (isMyTurn && (trickNum > 0 || leader === 0))
+      ? getLegalPlays(hands[0], ledSuit, trumpSuit) : [];
 
   let dealIdx = 0;
   hands[0].forEach(d => {
@@ -1497,6 +1518,15 @@ function renderHands() {
     if (isDealing) { el.classList.add('deal-in'); el.style.animationDelay = (dealIdx * 0.07) + 's'; dealIdx++; }
     southEl.appendChild(el);
   });
+
+  // Safety: if hand has tiles but nothing rendered, force-render all as playable
+  if (hands[0].length > 0 && southEl.children.length === 0) {
+    console.error('RENDER BUG: hand has tiles but southEl is empty — force-rendering');
+    hands[0].forEach(d => {
+      const el = createDominoEl(d, false, false, true, () => humanPlay(d), false);
+      southEl.appendChild(el);
+    });
+  }
 
   // Opponents as mini tiles (face values shown in debug mode)
   ['west','north','east'].forEach((pos, pi) => {
@@ -1594,11 +1624,16 @@ function evaluateBiddingPower(hand, trumpSuit) {
     : hand.some(d => d[0] === trumpSuit && d[1] === trumpSuit);
 
   // ── Trick estimation ──────────────────────────────────────────────────────
+  // Dominant control = double + 4+ trumps: after pulling trumps, off-suit doubles win freely
+  const hasDominantTrump = hasDouble && trumpTiles.length >= 4;
+
   let myTricks = 0;
   if (hasDouble) {
-    myTricks = Math.min(trumpTiles.length * 0.9, 4.5); // control: win most trump
+    if (trumpTiles.length >= 4) myTricks = Math.min(trumpTiles.length * 0.85, 5.0); // dominant
+    else if (trumpTiles.length >= 3) myTricks = Math.min(trumpTiles.length * 0.80, 4.0); // good
+    else                             myTricks = Math.min(trumpTiles.length * 0.70, 3.0); // thin
   } else {
-    myTricks = Math.min(trumpTiles.length * 0.4, 2.5); // no control: vulnerable
+    myTricks = Math.min(trumpTiles.length * 0.40, 2.5); // no control: vulnerable
   }
 
   if (trumpSuit !== 7) {
@@ -1609,32 +1644,35 @@ function evaluateBiddingPower(hand, trumpSuit) {
       suitMap[s].push(d);
     });
     Object.values(suitMap).forEach(tiles => {
-      if (tiles.some(d => d[0] === d[1])) myTricks += 0.7; // off-suit double likely wins
-      if (tiles.length >= 4) myTricks += 0.4;
-      else if (tiles.length >= 3) myTricks += 0.2;
+      const hasOffDouble = tiles.some(d => d[0] === d[1]);
+      if (hasOffDouble) {
+        // After clearing trumps, opponent can no longer ruff these
+        myTricks += hasDominantTrump ? 0.85 : 0.50;
+      }
+      if (tiles.length >= 4)      myTricks += hasDominantTrump ? 0.40 : 0.20;
+      else if (tiles.length >= 3) myTricks += hasDominantTrump ? 0.20 : 0.10;
     });
   }
-  myTricks = Math.min(myTricks, 5);
+  myTricks = Math.min(myTricks, 5.5);
 
   // ── Count capture ─────────────────────────────────────────────────────────
   const trumpCount = hand.filter(d => isTrump(d, trumpSuit))
     .reduce((s, d) => s + countingPoints(d), 0);
 
   let trumpCountCapture;
-  if (hasDouble && trumpTiles.length >= 3) {
-    trumpCountCapture = trumpCount * 0.80; // strong control
-  } else if (hasDouble) {
-    trumpCountCapture = trumpCount * 0.60; // have double, thin suit
-  } else {
-    trumpCountCapture = trumpCount * 0.25; // no control, risky
-  }
+  if (hasDominantTrump)                  trumpCountCapture = trumpCount * 0.85;
+  else if (hasDouble && trumpTiles.length >= 3) trumpCountCapture = trumpCount * 0.75;
+  else if (hasDouble)                    trumpCountCapture = trumpCount * 0.60;
+  else                                   trumpCountCapture = trumpCount * 0.25;
 
   let offCountCapture = 0;
   if (trumpSuit !== 7) {
     hand.filter(d => !isTrump(d, trumpSuit) && countingPoints(d) > 0).forEach(d => {
       const s = getSuit(d, trumpSuit);
       const hasOffDouble = hand.some(h => h[0] === s && h[1] === s);
-      offCountCapture += countingPoints(d) * (hasOffDouble ? 0.50 : 0.15);
+      if (hasOffDouble && hasDominantTrump) offCountCapture += countingPoints(d) * 0.70;
+      else if (hasOffDouble)                offCountCapture += countingPoints(d) * 0.50;
+      else                                  offCountCapture += countingPoints(d) * 0.20;
     });
   }
 
@@ -1673,7 +1711,118 @@ function evaluateBiddingPower(hand, trumpSuit) {
   const partnerTricks = myStrength > 18 ? 1.5 : myStrength > 12 ? 2.5 : 3.0;
   const partnerCount  = myStrength > 18 ? 8   : myStrength > 12 ? 10  : 12;
 
-  return Math.floor(myStrength + partnerTricks + partnerCount);
+  // ── Dominant trump bonus: off-suit doubles become free winners after trump pull ─
+  let dominantBonus = 0;
+  if (hasDominantTrump && trumpSuit !== 7) {
+    const offSuitDoubles = hand.filter(d => !isTrump(d, trumpSuit) && d[0] === d[1]).length;
+    dominantBonus = offSuitDoubles * 3;
+    const totalCount = hand.reduce((s, d) => s + countingPoints(d), 0);
+    if (totalCount >= 15) dominantBonus += 3;
+  }
+
+  return Math.floor(myStrength + partnerTricks + partnerCount + dominantBonus);
+}
+
+function analyzeHandForBidding(hand) {
+  const SUIT_NAMES = ['Blanks','Ones','Twos','Threes','Fours','Fives','Sixes','Doubles'];
+  let bestExpected = -1, bestSuit = 0;
+  for (let s = 0; s <= 7; s++) {
+    const e = evaluateBiddingPower(hand, s);
+    if (e > bestExpected) { bestExpected = e; bestSuit = s; }
+  }
+
+  // Re-compute components for the best suit
+  const ts = bestSuit;
+  const trumpTiles = hand.filter(d => isTrump(d, ts));
+  const hasDouble = ts === 7
+    ? hand.some(d => d[0] === d[1] && d[0] === 6)
+    : hand.some(d => d[0] === ts && d[1] === ts);
+
+  const hasDominantTrump = hasDouble && trumpTiles.length >= 4;
+
+  let myTricks = 0;
+  if (hasDouble) {
+    if (trumpTiles.length >= 4) myTricks = Math.min(trumpTiles.length * 0.85, 5.0);
+    else if (trumpTiles.length >= 3) myTricks = Math.min(trumpTiles.length * 0.80, 4.0);
+    else                             myTricks = Math.min(trumpTiles.length * 0.70, 3.0);
+  } else {
+    myTricks = Math.min(trumpTiles.length * 0.40, 2.5);
+  }
+  if (ts !== 7) {
+    const suitMap = {};
+    hand.filter(d => !isTrump(d, ts)).forEach(d => {
+      const s = getSuit(d, ts);
+      if (!suitMap[s]) suitMap[s] = [];
+      suitMap[s].push(d);
+    });
+    Object.values(suitMap).forEach(tiles => {
+      const hasOffDouble = tiles.some(d => d[0] === d[1]);
+      if (hasOffDouble)           myTricks += hasDominantTrump ? 0.85 : 0.50;
+      if (tiles.length >= 4)      myTricks += hasDominantTrump ? 0.40 : 0.20;
+      else if (tiles.length >= 3) myTricks += hasDominantTrump ? 0.20 : 0.10;
+    });
+  }
+  myTricks = Math.min(myTricks, 5.5);
+
+  const trumpCount = trumpTiles.reduce((s, d) => s + countingPoints(d), 0);
+  let trumpCountCapture;
+  if (hasDominantTrump)                       trumpCountCapture = trumpCount * 0.85;
+  else if (hasDouble && trumpTiles.length >= 3) trumpCountCapture = trumpCount * 0.75;
+  else if (hasDouble)                           trumpCountCapture = trumpCount * 0.60;
+  else                                          trumpCountCapture = trumpCount * 0.25;
+
+  let offCountCapture = 0;
+  if (ts !== 7) {
+    hand.filter(d => !isTrump(d, ts) && countingPoints(d) > 0).forEach(d => {
+      const s = getSuit(d, ts);
+      const hasOffDouble = hand.some(h => h[0] === s && h[1] === s);
+      if (hasOffDouble && hasDominantTrump) offCountCapture += countingPoints(d) * 0.70;
+      else if (hasOffDouble)                offCountCapture += countingPoints(d) * 0.50;
+      else                                  offCountCapture += countingPoints(d) * 0.20;
+    });
+  }
+
+  let extractedCount = 0;
+  if (ts !== 7) {
+    for (let suit = 0; suit <= 6; suit++) {
+      if (suit === ts) continue;
+      const hasCtrl = hand.some(d => d[0] === suit && d[1] === suit);
+      if (!hasCtrl) continue;
+      const tilesInSuit = hand.filter(d => d[0] === suit || d[1] === suit).length;
+      if (tilesInSuit < 3) continue;
+      let ev = 0;
+      const has = (a, b) => hand.some(d => (d[0]===a&&d[1]===b)||(d[0]===b&&d[1]===a));
+      if (suit === 0 && !has(5,0))  ev += 5;
+      if (suit === 1 && !has(4,1))  ev += 5;
+      if (suit === 2 && !has(3,2))  ev += 5;
+      if (suit === 3 && !has(3,2))  ev += 5;
+      if (suit === 4) { if (!has(4,1)) ev += 5; if (!has(6,4)) ev += 10; }
+      if (suit === 5) { if (!has(5,0)) ev += 5; if (!has(5,5)) ev += 10; if (!has(6,4)) ev += 10; }
+      if (suit === 6 && !has(6,4))  ev += 10;
+      const prob = tilesInSuit >= 5 ? 0.60 : tilesInSuit >= 4 ? 0.50 : 0.35;
+      extractedCount += ev * prob;
+    }
+  }
+
+  const myStrength = myTricks + trumpCountCapture + offCountCapture + extractedCount;
+  const partnerTricks = myStrength > 18 ? 1.5 : myStrength > 12 ? 2.5 : 3.0;
+  const partnerCount  = myStrength > 18 ? 8   : myStrength > 12 ? 10  : 12;
+  let dominantBonus = 0;
+  if (hasDominantTrump && ts !== 7) {
+    const offSuitDoubles = hand.filter(d => !isTrump(d, ts) && d[0] === d[1]).length;
+    dominantBonus = offSuitDoubles * 3;
+    const totalCount = hand.reduce((s, d) => s + countingPoints(d), 0);
+    if (totalCount >= 15) dominantBonus += 3;
+  }
+  const expectedValue = Math.floor(myStrength + partnerTricks + partnerCount + dominantBonus);
+
+  let recommendedBid;
+  if (expectedValue < 30 || expectedValue < highestBid + 1) recommendedBid = 'pass';
+  else recommendedBid = String(Math.min(expectedValue, 42));
+
+  return { bestTrump: ts, bestTrumpName: SUIT_NAMES[ts], expectedValue,
+           myTricks, trumpCount, trumpCountCapture, offCountCapture, extractedCount,
+           partnerTricks, partnerCount, recommendedBid, hasDouble };
 }
 
 function chooseBestTrump(hand) {
@@ -2004,8 +2153,28 @@ function doBidRound(bidder) {
 
 function showHumanBidUI() {
   document.getElementById('bid-overlay').classList.remove('hidden');
-  document.getElementById('bid-status').textContent = highestBid>0
+  const bidStatusEl = document.getElementById('bid-status');
+  const highBidStr = highestBid > 0
     ? `High bid: ${highestBid} by ${PLAYER_NAMES[bidWinner]}` : 'No bids yet.';
+  if (debugMode) {
+    const a = analyzeHandForBidding(hands[0]);
+    const recColor = a.recommendedBid === 'pass' ? '#f88' : '#8f8';
+    const extras = (a.offCountCapture > 0 ? ` &nbsp;Off: <b>${a.offCountCapture.toFixed(1)}</b>` : '')
+                 + (a.extractedCount  > 0 ? ` &nbsp;Extract: <b>${a.extractedCount.toFixed(1)}</b>` : '');
+    bidStatusEl.innerHTML =
+      `<div style="font-size:11px;color:#adf;text-align:left;padding:5px 7px;`
+      + `background:rgba(0,0,60,0.5);border-radius:6px;margin-bottom:6px;line-height:1.7">`
+      + `<span style="color:#ffd700;font-weight:700">🐛 ${a.bestTrumpName} trump</span><br>`
+      + `Tricks: <b>${a.myTricks.toFixed(1)}</b>`
+      + ` &nbsp;Trump count: <b>${a.trumpCountCapture.toFixed(1)}</b>`
+      + extras
+      + `<br>Partner: <b>${a.partnerTricks.toFixed(1)} tricks + ${a.partnerCount} pts</b>`
+      + ` &nbsp;<span style="color:#ffd700">Expected: <b>${a.expectedValue}</b></span>`
+      + ` &nbsp;Rec: <b style="color:${recColor}">${a.recommendedBid}</b>`
+      + `</div>${highBidStr}`;
+  } else {
+    bidStatusEl.textContent = highBidStr;
+  }
   const btns = document.getElementById('bid-buttons');
   btns.innerHTML = '';
   const minBid = Math.max(30,highestBid+1);
