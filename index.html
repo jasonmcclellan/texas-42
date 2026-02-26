@@ -546,6 +546,52 @@ html, body {
   font-size: 11px; color: #ffd700; text-align: center;
   margin-top: 3px; line-height: 1.5; word-break: break-all; padding: 0 3px;
 }
+/* === DEALER SELECTION OVERLAY === */
+#dealer-select-overlay {
+  position: fixed; inset: 0; z-index: 150;
+  background: rgba(0,0,0,0.88);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+#dealer-select-overlay.hidden { display: none; }
+.dso-title {
+  color: #e8cece; font-size: 15px; font-weight: 600;
+  letter-spacing: 1px; margin-bottom: 14px; text-align: center;
+}
+#dso-arena {
+  position: relative; width: 340px; height: 320px;
+}
+.dso-slot {
+  position: absolute; display: flex; flex-direction: column;
+  align-items: center; gap: 5px;
+}
+.dso-slot-label {
+  font-size: 11px; color: #b09090; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px; text-align: center;
+}
+#dso-message {
+  color: #ffd700; font-size: 14px; font-weight: 600;
+  text-align: center; margin-top: 14px;
+  min-height: 20px; letter-spacing: 0.3px; padding: 0 20px;
+}
+.domino.face-down {
+  background: #2d0000;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%232d0000'/%3E%3Cpolygon points='50,20 56,38 75,39 60,50 65,68 50,58 35,68 40,50 25,39 44,38' fill='%23e8cece' opacity='0.35'/%3E%3C/svg%3E");
+  background-size: 60%; background-repeat: no-repeat; background-position: center;
+  border-color: #1a0000;
+}
+@keyframes dsoDeal {
+  from { transform: translate(var(--dx), var(--dy)) scale(0.55); opacity: 0; }
+  to   { transform: translate(0, 0) scale(1); opacity: 1; }
+}
+@keyframes dsoFlip {
+  0%  { transform: scaleX(1); }
+  45% { transform: scaleX(0); }
+  55% { transform: scaleX(0); }
+  100%{ transform: scaleX(1); }
+}
+.dso-dealing  { animation: dsoDeal  0.45s cubic-bezier(0.2,0,0.3,1) forwards; }
+.dso-flipping { animation: dsoFlip  0.5s  ease-in-out            forwards; }
 </style>
 </head>
 <body>
@@ -829,6 +875,13 @@ html, body {
     </div>
   </div>
 
+  <!-- Dealer selection animation -->
+  <div id="dealer-select-overlay" class="hidden">
+    <div class="dso-title">Drawing for first deal…</div>
+    <div id="dso-arena"></div>
+    <div id="dso-message"></div>
+  </div>
+
 </div>
 
 <script>
@@ -965,6 +1018,8 @@ function debugContinue() {
   if (!_debugPendingPlay) return;
   const cb = _debugPendingPlay;
   _debugPendingPlay = null;
+  const bar = document.getElementById('message-bar');
+  if (bar) bar.textContent = '…';
   cb();
 }
 
@@ -987,6 +1042,128 @@ function splashToggleDebug() {
   const btn = document.getElementById('splash-debug-btn');
   if (btn) { btn.textContent = debugMode ? 'ON' : 'OFF'; btn.classList.toggle('off', !debugMode); }
   updateSettingsUI();
+}
+
+// ============ DEALER SELECTION ANIMATION ============
+function runDealerSelection(callback) {
+  const overlay = document.getElementById('dealer-select-overlay');
+  overlay.classList.remove('hidden');
+  const arena = document.getElementById('dso-arena');
+  const msgEl = document.getElementById('dso-message');
+
+  // Slot layout inside the 340×320 arena. --dx/--dy are the starting offsets
+  // (from slot position toward pile center) so tiles appear to fly FROM pile TO slot.
+  const SLOTS = [
+    { seat:0, lx:149, ty:225, horiz:false, dx:  0, dy: -70 },
+    { seat:1, lx:  5, ty:130, horiz:true,  dx: 126, dy:   0 },
+    { seat:2, lx:149, ty:  5, horiz:false, dx:  0, dy:  70 },
+    { seat:3, lx:252, ty:130, horiz:true,  dx:-122, dy:   0 },
+  ];
+
+  function buildArena() {
+    arena.innerHTML = '';
+    // Decorative pile: 8 staggered face-down tiles fanned at center
+    const pile = document.createElement('div');
+    pile.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-55%);width:60px;height:80px;';
+    const rots = [-20,-12,-5,4,13,21,-8,10];
+    const offs = [[-3,-6],[2,-4],[-1,-2],[3,0],[0,2],[-2,4],[1,-1],[4,3]];
+    for (let i = 0; i < 8; i++) {
+      const t = createDominoEl([0,0], true, false, false, null, true);
+      t.style.cssText = `position:absolute;left:${offs[i][0]}px;top:${offs[i][1]-i*2}px;`
+                      + `transform:rotate(${rots[i]}deg);z-index:${i};`;
+      pile.appendChild(t);
+    }
+    arena.appendChild(pile);
+
+    // Slot divs with player labels
+    SLOTS.forEach(s => {
+      const div = document.createElement('div');
+      div.className = 'dso-slot'; div.id = 'dso-slot-' + s.seat;
+      div.style.cssText = `left:${s.lx}px;top:${s.ty}px;`;
+      const lbl = document.createElement('div');
+      lbl.className = 'dso-slot-label';
+      lbl.textContent = PLAYER_NAMES[s.seat];
+      div.appendChild(lbl);
+      arena.appendChild(div);
+    });
+  }
+
+  function dealRound(tilesBySeat, onDone) {
+    const wraps = {};
+
+    // Phase A: slide face-down tiles from pile to each slot, 380 ms apart
+    SLOTS.forEach((s, i) => {
+      setTimeout(() => {
+        const slotEl = document.getElementById('dso-slot-' + s.seat);
+        const wrap = document.createElement('div');
+        wrap.className = 'dso-dealing';
+        wrap.style.setProperty('--dx', s.dx + 'px');
+        wrap.style.setProperty('--dy', s.dy + 'px');
+        wrap.appendChild(createDominoEl([0,0], true, s.horiz, false, null, false));
+        slotEl.appendChild(wrap);
+        wraps[s.seat] = { wrap, slot: s };
+        Sound.tap();
+      }, i * 380);
+    });
+
+    // Phase B: flip face-up after all dealt + 500 ms pause, 320 ms apart
+    const flipStart = 4 * 380 + 500;
+    SLOTS.forEach((s, i) => {
+      setTimeout(() => {
+        const info = wraps[s.seat];
+        info.wrap.classList.add('dso-flipping');
+        // Swap content at the scaleX midpoint so the face-up tile reveals cleanly
+        setTimeout(() => {
+          info.wrap.innerHTML = '';
+          info.wrap.appendChild(createDominoEl(tilesBySeat[s.seat], false, s.horiz, false, null, false));
+          Sound.click();
+        }, 250);
+      }, flipStart + i * 320);
+    });
+
+    // Phase C: evaluate after all flipped + 700 ms pause
+    const evalAt = flipStart + 4 * 320 + 700;
+    setTimeout(() => {
+      let bestPip = -1, bestSeat = -1;
+      SLOTS.forEach(s => {
+        const d = tilesBySeat[s.seat];
+        if (d[0] === d[1] && d[0] > bestPip) { bestPip = d[0]; bestSeat = s.seat; }
+      });
+      onDone(bestSeat, bestPip);
+    }, evalAt);
+  }
+
+  function runRound() {
+    buildArena();
+    const shuffled = shuffle(allDominoes());
+    const tilesBySeat = {};
+    SLOTS.forEach((s, i) => { tilesBySeat[s.seat] = shuffled[i]; });
+
+    dealRound(tilesBySeat, (winnerSeat, winnerPip) => {
+      if (winnerSeat >= 0) {
+        // Highlight winner with gold glow
+        const slotEl = document.getElementById('dso-slot-' + winnerSeat);
+        const domEl  = slotEl.querySelector('.domino');
+        if (domEl) domEl.classList.add('winner-glow');
+        Sound.ding();
+        const name = PLAYER_NAMES[winnerSeat];
+        const isYou = winnerSeat === 0;
+        msgEl.textContent = `${name} ${isYou?'draw':'draws'} ${winnerPip}-${winnerPip}! ${name} ${isYou?'deal':'deals'} first.`;
+        setTimeout(() => {
+          overlay.classList.add('hidden');
+          arena.innerHTML = '';
+          msgEl.textContent = '';
+          dealer = winnerSeat;
+          callback();
+        }, 2600);
+      } else {
+        msgEl.textContent = 'No doubles! Drawing again\u2026';
+        setTimeout(() => { msgEl.textContent = ''; runRound(); }, 1800);
+      }
+    });
+  }
+
+  setTimeout(runRound, 300);
 }
 
 function updateSettingsUI() {
@@ -1411,17 +1588,19 @@ function evaluateHand(hand) {
 function evaluateBiddingPower(hand, trumpSuit) {
   const trumpTiles = hand.filter(d => isTrump(d, trumpSuit));
 
-  // Control: does this player hold the highest trump (the double)?
+  // 6-6 required for doubles trump control; suit double required otherwise
   const hasDouble = trumpSuit === 7
-    ? hand.some(d => d[0] === d[1] && d[0] >= 5)        // doubles trump: 5-5 or 6-6
+    ? hand.some(d => d[0] === d[1] && d[0] === 6)
     : hand.some(d => d[0] === trumpSuit && d[1] === trumpSuit);
 
-  // Tricks YOUR hand will likely win
-  let myTricks = hasDouble
-    ? Math.min(trumpTiles.length, 5)                     // control → win most trump
-    : Math.max(0, Math.floor(trumpTiles.length * 0.4));  // vulnerable without the double
+  // ── Trick estimation ──────────────────────────────────────────────────────
+  let myTricks = 0;
+  if (hasDouble) {
+    myTricks = Math.min(trumpTiles.length * 0.9, 4.5); // control: win most trump
+  } else {
+    myTricks = Math.min(trumpTiles.length * 0.4, 2.5); // no control: vulnerable
+  }
 
-  // Off-suit trick potential (not applicable for doubles trump)
   if (trumpSuit !== 7) {
     const suitMap = {};
     hand.filter(d => !isTrump(d, trumpSuit)).forEach(d => {
@@ -1430,21 +1609,71 @@ function evaluateBiddingPower(hand, trumpSuit) {
       suitMap[s].push(d);
     });
     Object.values(suitMap).forEach(tiles => {
-      if (tiles.some(d => d[0] === d[1])) myTricks += 0.5; // double = likely trick
-      if (tiles.length >= 3)              myTricks += 0.5; // long suit
+      if (tiles.some(d => d[0] === d[1])) myTricks += 0.7; // off-suit double likely wins
+      if (tiles.length >= 4) myTricks += 0.4;
+      else if (tiles.length >= 3) myTricks += 0.2;
     });
   }
-  myTricks = Math.min(myTricks, 6); // partner should win some tricks too
+  myTricks = Math.min(myTricks, 5);
 
-  // Count points you'll likely capture in the tricks you win
-  const myCount      = hand.reduce((s, d) => s + countingPoints(d), 0);
-  const captureRate  = hasDouble ? 0.75 : 0.40;
-  const myCaptured   = myCount * captureRate;
+  // ── Count capture ─────────────────────────────────────────────────────────
+  const trumpCount = hand.filter(d => isTrump(d, trumpSuit))
+    .reduce((s, d) => s + countingPoints(d), 0);
 
-  // Average contribution expected from your partner
-  const partnerAvg = 22;
+  let trumpCountCapture;
+  if (hasDouble && trumpTiles.length >= 3) {
+    trumpCountCapture = trumpCount * 0.80; // strong control
+  } else if (hasDouble) {
+    trumpCountCapture = trumpCount * 0.60; // have double, thin suit
+  } else {
+    trumpCountCapture = trumpCount * 0.25; // no control, risky
+  }
 
-  return Math.floor(myTricks + myCaptured + partnerAvg);
+  let offCountCapture = 0;
+  if (trumpSuit !== 7) {
+    hand.filter(d => !isTrump(d, trumpSuit) && countingPoints(d) > 0).forEach(d => {
+      const s = getSuit(d, trumpSuit);
+      const hasOffDouble = hand.some(h => h[0] === s && h[1] === s);
+      offCountCapture += countingPoints(d) * (hasOffDouble ? 0.50 : 0.15);
+    });
+  }
+
+  // ── Count extraction from opponents ──────────────────────────────────────
+  let extractedCount = 0;
+  if (trumpSuit !== 7) {
+    for (let suit = 0; suit <= 6; suit++) {
+      if (suit === trumpSuit) continue;
+      const hasCtrl = hand.some(d => d[0] === suit && d[1] === suit);
+      if (!hasCtrl) continue;
+      const tilesInSuit = hand.filter(d => d[0] === suit || d[1] === suit).length;
+      if (tilesInSuit < 3) continue; // need depth to reliably lead the suit
+      let extractableValue = 0;
+      const has = (a, b) => hand.some(d => (d[0]===a&&d[1]===b)||(d[0]===b&&d[1]===a));
+      if (suit === 0 && !has(5,0))  extractableValue += 5;
+      if (suit === 1 && !has(4,1))  extractableValue += 5;
+      if (suit === 2 && !has(3,2))  extractableValue += 5;
+      if (suit === 3 && !has(3,2))  extractableValue += 5;
+      if (suit === 4) {
+        if (!has(4,1)) extractableValue += 5;
+        if (!has(6,4)) extractableValue += 10;
+      }
+      if (suit === 5) {
+        if (!has(5,0)) extractableValue += 5;
+        if (!has(5,5)) extractableValue += 10;
+        if (!has(6,4)) extractableValue += 10;
+      }
+      if (suit === 6 && !has(6,4))  extractableValue += 10;
+      const probability = tilesInSuit >= 5 ? 0.60 : tilesInSuit >= 4 ? 0.50 : 0.35;
+      extractedCount += extractableValue * probability;
+    }
+  }
+
+  // ── Partner contribution (scales down as your hand gets stronger) ─────────
+  const myStrength = myTricks + trumpCountCapture + offCountCapture + extractedCount;
+  const partnerTricks = myStrength > 18 ? 1.5 : myStrength > 12 ? 2.5 : 3.0;
+  const partnerCount  = myStrength > 18 ? 8   : myStrength > 12 ? 10  : 12;
+
+  return Math.floor(myStrength + partnerTricks + partnerCount);
 }
 
 function chooseBestTrump(hand) {
@@ -1553,37 +1782,43 @@ function aiChooseLead(player, legal) {
 }
 
 function aiChooseFollow(player, legal) {
-  const pers=player===2?partnerPersonality:'eddie';
-  const isOurTeam=TEAM_US.includes(player);
-  const winner=partialTrickWinner();
-  const ourTeamWinning=TEAM_US.includes(winner)===isOurTeam;
-  const countSoFar=trickCountSoFar();
-  const ldSuit=ledSuit;
-  const trumpTiles=legal.filter(d=>isTrump(d,trumpSuit));
-  const followTiles=legal.filter(d=>!isTrump(d,trumpSuit)&&canFollowSuit(d,ldSuit,trumpSuit));
-  const offTiles=legal.filter(d=>!isTrump(d,trumpSuit)&&!canFollowSuit(d,ldSuit,trumpSuit));
-  const fightThresh=pers==='barbara'?3:pers==='carl'?8:5;
-  if(ourTeamWinning){
-    if(pers==='carl') return legal.reduce((b,d)=>(d[0]+d[1])<(b[0]+b[1])?d:b);
-    const countTiles=legal.filter(d=>countingPoints(d)>0&&!isTrump(d,trumpSuit));
-    if(countTiles.length>0) return countTiles.reduce((b,d)=>countingPoints(d)>countingPoints(b)?d:b);
-    const safe=offTiles.length>0?offTiles:legal;
-    return safe.reduce((b,d)=>(d[0]+d[1])<(b[0]+b[1])?d:b);
+  const winner = partialTrickWinner();
+  const winningDom = winner >= 0 ? currentTrick[winner] : null;
+  const isPartner = winner === (player + 2) % 4;
+  const isOurTeam = TEAM_US.includes(player) === TEAM_US.includes(winner);
+
+  // Helper: does domino d beat the current winning domino?
+  function beats(d) {
+    if (!winningDom) return true;
+    if (isTrump(winningDom, trumpSuit)) {
+      return isTrump(d, trumpSuit) && trumpRank(d, trumpSuit) > trumpRank(winningDom, trumpSuit);
+    } else {
+      if (isTrump(d, trumpSuit)) return true;
+      if (canFollowSuit(d, ledSuit, trumpSuit)) {
+        return suitRank(d, ledSuit, trumpSuit) > suitRank(winningDom, ledSuit, trumpSuit);
+      }
+    }
+    return false;
   }
-  const winnerDom=currentTrick[winner];
-  const winnerIsTrump=isTrump(winnerDom,trumpSuit);
-  const winningFollow=followTiles.filter(d=>{
-    if(winnerIsTrump) return false;
-    return suitRank(d,ldSuit,trumpSuit)>suitRank(winnerDom,ldSuit,trumpSuit);
-  }).sort((a,b)=>suitRank(a,ldSuit,trumpSuit)-suitRank(b,ldSuit,trumpSuit));
-  if(winningFollow.length>0&&countSoFar>=fightThresh) return winningFollow[0];
-  if(trumpTiles.length>0&&countSoFar>=fightThresh){
-    const wt=winnerIsTrump?trumpTiles.filter(d=>trumpRank(d,trumpSuit)>trumpRank(winnerDom,trumpSuit)):trumpTiles;
-    if(wt.length>0){wt.sort((a,b)=>trumpRank(a,trumpSuit)-trumpRank(b,trumpSuit));return wt[0];}
+
+  const canWin = legal.some(beats);
+
+  // CASE 1: Partner is winning — load count without stealing the trick
+  if (isPartner && winningDom) {
+    const wontBeat = legal.filter(d => !beats(d));
+    if (wontBeat.length > 0) {
+      return wontBeat.reduce((best, d) => countingPoints(d) > countingPoints(best) ? d : best);
+    }
   }
-  const nonCount=legal.filter(d=>countingPoints(d)===0);
-  if(nonCount.length>0) return nonCount.reduce((b,d)=>(d[0]+d[1])<(b[0]+b[1])?d:b);
-  return legal.reduce((b,d)=>countingPoints(d)<=countingPoints(b)?d:b);
+
+  // CASE 2: Opponent winning and we can beat them — play highest-count winning domino
+  if (canWin && !isOurTeam) {
+    const winningPlays = legal.filter(beats);
+    return winningPlays.reduce((best, d) => countingPoints(d) > countingPoints(best) ? d : best);
+  }
+
+  // CASE 3: Can't win (or team already winning but not partner) — shed lowest count
+  return legal.reduce((best, d) => countingPoints(d) < countingPoints(best) ? d : best);
 }
 
 function selectPartner(choice) {
@@ -1659,9 +1894,9 @@ function getAiBid(bidder, hand, highestBid) {
   // Personality: shift expected score up (optimism) or down (caution)
   let bidTarget;
   if (pers === 'barbara') {
-    bidTarget = bestExpected + 2 + Math.floor(Math.random() * 2); // +2-3 optimistic
+    bidTarget = bestExpected + 1 + Math.floor(Math.random() * 2); // +1-2 optimistic
   } else if (pers === 'carl') {
-    bidTarget = bestExpected - 1;                                  // -1 conservative
+    bidTarget = bestExpected - 2 - Math.floor(Math.random() * 2); // -2-3 conservative
   } else {
     bidTarget = bestExpected;                                      // eddie: realistic
   }
@@ -1963,7 +2198,7 @@ function aiPlay(player) {
   if(legal.length===1){
     if(debugMode){
       const msg=`🐛 ${PLAYER_NAMES[player]} plays ${domName(legal[0])} (only legal play)`;
-      console.log(msg); debugPause(msg, player, legal[0]); return;
+      console.log(msg); debugPause(msg, ()=>playDomino(player, legal[0])); return;
     }
     playDomino(player,legal[0]);return;
   }
@@ -1972,7 +2207,7 @@ function aiPlay(player) {
   const reason=getAiReason(player,domino,legal);
   if(debugMode){
     const msg='🐛 '+(reason||`${PLAYER_NAMES[player]} plays ${domName(domino)}`);
-    console.log(msg); debugPause(msg, player, domino); return;
+    console.log(msg); debugPause(msg, ()=>playDomino(player, domino)); return;
   }
   if(reason) showAiToast(reason);
   playDomino(player,domino);
@@ -2312,13 +2547,13 @@ function startGame(){
   PLAYER_NAMES[2]=PERSONALITIES[partnerPersonality].short;
   const _pl=document.getElementById('partner-label');
   if(_pl) _pl.textContent=PERSONALITIES[partnerPersonality].short;
-  dealer=Math.floor(Math.random()*4);
   marksUs=0;marksThem=0;
   gameLength=localStorage.getItem(GAME_LENGTH_KEY)||'7';
   gsHandsPlayed=0;gsBidsWon=[0,0,0,0];gsBidsMade=[0,0,0,0];gsBidsSet=[0,0,0,0];
   gsTricksWon=[0,0,0,0];gsHighestBid=0;gsHighestBidder=-1;gameHandLog=[];handNumber=0;
   updateTargetLabel();
-  dealAndStart();
+  // dealer is set inside runDealerSelection before the callback fires
+  runDealerSelection(() => dealAndStart());
 }
 
 function dealAndStart(){
